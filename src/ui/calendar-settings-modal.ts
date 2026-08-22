@@ -1,0 +1,363 @@
+import { Modal, Notice, Setting, setIcon } from 'obsidian';
+import { copyCalendarConfig } from '../domain/calendar-copy';
+import { resolveWeekStart } from '../domain/dates';
+import {
+	addCalendarProperty,
+	updateCalendarProperty,
+} from '../domain/property-schema';
+import type CalendarViewPlugin from '../main';
+import type { CalendarConfig, CalendarPropertyDefinition } from '../types';
+import { PropertyEditorModal } from './property-editor-modal';
+import { renderPropertyManager } from './property-manager';
+import { applyUiLocale } from './ui-locale';
+
+const SUNDAY = 'Sunday';
+
+type SettingsSectionId = 'calendar' | 'fields' | 'properties' | 'view';
+
+interface SettingsSectionDefinition {
+	id: SettingsSectionId;
+	label: string;
+	icon: string;
+	description: string;
+	render: (container: HTMLElement) => void;
+}
+
+export class CalendarSettingsModal extends Modal {
+	private draft: CalendarConfig;
+	private saveTimer?: number;
+	private saveQueue: Promise<void> = Promise.resolve();
+	private errorEl?: HTMLElement;
+	private propertyManagerEl?: HTMLElement;
+	private activeSection: SettingsSectionId = 'calendar';
+
+	constructor(
+		private readonly plugin: CalendarViewPlugin,
+		config: CalendarConfig,
+		private readonly onApplied: (config: CalendarConfig) => Promise<void>,
+	) {
+		super(plugin.app);
+		this.draft = copyCalendarConfig(config);
+	}
+
+	onOpen(): void {
+		applyUiLocale(this.modalEl);
+		this.setTitle('Calendar settings');
+		this.modalEl.addClass('cv-settings-modal');
+		this.contentEl.addClass('cv-settings-content');
+		this.errorEl = this.contentEl.createDiv({ cls: 'cv-form-error' });
+		const dateProperties = this.plugin.documents.discoverDateProperties(this.draft);
+		const layout = this.contentEl.createDiv({ cls: 'cv-settings-layout' });
+		const navigation = layout.createDiv({ cls: 'cv-settings-nav' });
+		navigation.setAttribute('role', 'tablist');
+		navigation.setAttribute('aria-label', 'Calendar settings sections');
+		const pane = layout.createDiv({ cls: 'cv-settings-pane' });
+		const sections: SettingsSectionDefinition[] = [
+			{
+				id: 'calendar',
+				label: 'Calendar',
+				icon: 'calendar-days',
+				description: 'Choose the calendar name and which notes are included.',
+				render: (container) => {
+					this.renderCalendarSettings(container);
+					this.renderExcludedPathsSetting(container);
+				},
+			},
+			{
+				id: 'fields',
+				label: 'Event fields',
+				icon: 'calendar-range',
+				description: 'Map Markdown properties to the fields the calendar uses.',
+				render: (container) => this.renderFieldSettings(container, dateProperties),
+			},
+			{
+				id: 'properties',
+				label: 'Properties',
+				icon: 'list-tree',
+				description: 'Create reusable fields and control what appears on event cards.',
+				render: (container) => this.renderPropertySettings(container),
+			},
+			{
+				id: 'view',
+				label: 'View',
+				icon: 'layout-grid',
+				description: 'Choose how the calendar starts, lays out, and opens notes.',
+				render: (container) => this.renderViewSettings(container),
+			},
+		];
+
+		for (const definition of sections) {
+			this.createNavigationButton(navigation, layout, definition);
+			const group = this.createSettingsSection(pane, definition);
+			definition.render(group);
+		}
+		this.activateSection(layout, this.activeSection);
+	}
+
+	private createSettingsSection(
+		parent: HTMLElement,
+		definition: SettingsSectionDefinition,
+	): HTMLElement {
+		const section = parent.createDiv({ cls: 'cv-settings-section' });
+		section.dataset.section = definition.id;
+		section.id = `cv-settings-section-${definition.id}`;
+		section.setAttribute('role', 'tabpanel');
+		const header = section.createDiv({ cls: 'cv-settings-section-header' });
+		const heading = header.createEl('h3', { text: definition.label });
+		heading.id = `cv-settings-heading-${definition.id}`;
+		section.setAttribute('aria-labelledby', heading.id);
+		header.createEl('p', { text: definition.description });
+		return section.createDiv({
+			cls: ['cv-settings-group', definition.id === 'properties' ? 'cv-property-manager' : '']
+				.filter(Boolean)
+				.join(' '),
+		});
+	}
+
+	private createNavigationButton(
+		parent: HTMLElement,
+		layout: HTMLElement,
+		definition: SettingsSectionDefinition,
+	): void {
+		const button = parent.createEl('button', {
+			cls: 'cv-settings-nav-item',
+			attr: {
+				type: 'button',
+				role: 'tab',
+				'aria-controls': `cv-settings-section-${definition.id}`,
+			},
+		});
+		button.dataset.section = definition.id;
+		const icon = button.createSpan({ cls: 'cv-settings-nav-icon' });
+		setIcon(icon, definition.icon);
+		button.createSpan({ text: definition.label });
+		button.addEventListener('click', () => {
+			this.activeSection = definition.id;
+			this.activateSection(layout, definition.id);
+		});
+		button.addEventListener('keydown', (event) => {
+			if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+			event.preventDefault();
+			const buttons = Array.from(parent.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+			const current = buttons.indexOf(button);
+			let next = current;
+			if (event.key === 'ArrowUp') next = (current - 1 + buttons.length) % buttons.length;
+			if (event.key === 'ArrowDown') next = (current + 1) % buttons.length;
+			if (event.key === 'Home') next = 0;
+			if (event.key === 'End') next = buttons.length - 1;
+			buttons[next]?.click();
+			buttons[next]?.focus();
+		});
+	}
+
+	private activateSection(layout: HTMLElement, active: SettingsSectionId): void {
+		for (const button of layout.querySelectorAll<HTMLElement>('.cv-settings-nav-item')) {
+			const selected = button.dataset.section === active;
+			button.toggleClass('is-active', selected);
+			button.setAttribute('aria-selected', String(selected));
+			button.tabIndex = selected ? 0 : -1;
+		}
+		for (const section of layout.querySelectorAll<HTMLElement>('.cv-settings-section')) {
+			section.hidden = section.dataset.section !== active;
+		}
+		layout.querySelector<HTMLElement>('.cv-settings-pane')?.scrollTo({ top: 0 });
+	}
+
+	private renderCalendarSettings(container: HTMLElement): void {
+		new Setting(container).setName('Name').addText((text) => {
+			text.setValue(this.draft.name).onChange((value) => {
+				this.draft.name = value.trim() || this.draft.name;
+				this.queueSave();
+			});
+		});
+		new Setting(container)
+			.setName('Include subfolders')
+			.setDesc('Index Markdown notes in nested folders.')
+			.addToggle((toggle) => {
+				toggle.setValue(this.draft.recursive).onChange((value) => {
+					this.draft.recursive = value;
+					this.queueSave();
+				});
+			});
+	}
+
+	private renderFieldSettings(container: HTMLElement, dateProperties: string[]): void {
+		new Setting(container)
+			.setName('Show calendar by')
+			.setDesc(
+				dateProperties.length > 0
+					? `Detected date properties: ${dateProperties.join(', ')}`
+					: 'Enter the frontmatter property containing the start date.',
+			)
+			.addText((text) => {
+				text.setValue(this.draft.startDateProperty).onChange((value) => {
+					this.draft.startDateProperty = value.trim();
+					this.queueSave();
+				});
+			});
+		new Setting(container)
+			.setName('End date property')
+			.setDesc('Leave empty to disable range resizing.')
+			.addText((text) => {
+				text.setValue(this.draft.endDateProperty ?? '').onChange((value) => {
+					const trimmed = value.trim();
+					if (trimmed) this.draft.endDateProperty = trimmed;
+					else delete this.draft.endDateProperty;
+					this.queueSave();
+				});
+			});
+	}
+
+	private renderPropertySettings(container: HTMLElement): void {
+		this.propertyManagerEl = container;
+		this.renderProperties();
+	}
+
+	private renderViewSettings(container: HTMLElement): void {
+		new Setting(container)
+			.setName(`Start week on ${SUNDAY}`)
+			.setDesc(`Show ${SUNDAY} as the first column of the calendar.`)
+			.addToggle((toggle) => {
+				toggle
+					.setValue(resolveWeekStart(this.draft.weekStartsOn) === 'sunday')
+					.onChange((enabled) => {
+						this.draft.weekStartsOn = enabled ? 'sunday' : 'monday';
+						this.queueSave();
+					});
+			});
+		new Setting(container).setName('Layout').addDropdown((dropdown) => {
+			dropdown
+				.addOption('month', 'Month')
+				.addOption('week', 'Week')
+				.setValue(this.draft.layout)
+				.onChange((value) => {
+					this.draft.layout = value as CalendarConfig['layout'];
+					this.queueSave();
+				});
+		});
+		new Setting(container).setName('Open behavior').addDropdown((dropdown) => {
+			dropdown
+				.addOption('same-leaf', 'Same leaf')
+				.addOption('new-tab', 'New tab')
+				.setValue(this.draft.openBehavior)
+				.onChange((value) => {
+					this.draft.openBehavior = value as CalendarConfig['openBehavior'];
+					this.queueSave();
+				});
+		});
+	}
+
+	private renderExcludedPathsSetting(container: HTMLElement): void {
+		new Setting(container)
+			.setClass('cv-settings-textarea-row')
+			.setName('Excluded paths')
+			.setDesc('Comma-separated files or folders inside the vault.')
+			.addTextArea((text) => {
+				text.setValue(this.draft.excludePaths.join(', ')).onChange((value) => {
+					this.draft.excludePaths = value
+						.split(/[\n,]/u)
+						.map((path) => path.trim())
+						.filter(Boolean);
+					this.queueSave();
+				});
+			});
+	}
+
+	private renderProperties(): void {
+		if (!this.propertyManagerEl) return;
+		renderPropertyManager(this.propertyManagerEl, this.draft, {
+			onAdd: () => this.openPropertyEditor(),
+			onEdit: (property) => this.openPropertyEditor(property),
+			onChange: (config) => {
+				this.draft = copyCalendarConfig(config);
+				this.queueSave();
+				this.renderProperties();
+			},
+		});
+	}
+
+	private openPropertyEditor(property?: string): void {
+		new PropertyEditorModal(
+			this.app,
+			this.draft.propertyDefinitions,
+			property,
+			(name, definition) => this.applyPropertyEdit(property, name, definition),
+		).open();
+	}
+
+	private async applyPropertyEdit(
+		currentName: string | undefined,
+		name: string,
+		definition: CalendarPropertyDefinition,
+	): Promise<void> {
+		if (currentName && currentName !== name) {
+			if (this.saveTimer !== undefined) {
+				window.clearTimeout(this.saveTimer);
+				this.saveTimer = undefined;
+			}
+			await this.saveQueue;
+			const nextConfig = await this.plugin.propertyMigration.rename(
+				this.draft,
+				currentName,
+				name,
+				definition,
+			);
+			this.draft = copyCalendarConfig(nextConfig);
+			this.renderProperties();
+			try {
+				await this.onApplied(nextConfig);
+				this.errorEl?.empty();
+			} catch (error) {
+				this.reportError(error, 'Property was renamed, but the calendar could not refresh.');
+			}
+			return;
+		}
+
+		let next = this.draft;
+		if (currentName) {
+			next = updateCalendarProperty(next, name, definition);
+		} else {
+			next = addCalendarProperty(next, name, definition);
+		}
+		this.draft = copyCalendarConfig(next);
+		this.queueSave();
+		this.renderProperties();
+	}
+
+	onClose(): void {
+		if (this.saveTimer !== undefined) {
+			window.clearTimeout(this.saveTimer);
+			void this.commit();
+		}
+		this.contentEl.empty();
+	}
+
+	private queueSave(): void {
+		if (this.saveTimer !== undefined) window.clearTimeout(this.saveTimer);
+		this.saveTimer = window.setTimeout(() => {
+			this.saveTimer = undefined;
+			void this.commit();
+		}, 350);
+	}
+
+	private async commit(): Promise<void> {
+		const snapshot = copyCalendarConfig(this.draft);
+		this.saveQueue = this.saveQueue.then(async () => {
+			try {
+				if (!snapshot.startDateProperty) throw new Error('Start date property cannot be empty.');
+				await this.plugin.documents.save(snapshot);
+				await this.onApplied(snapshot);
+				this.errorEl?.empty();
+			} catch (error) {
+				this.reportError(error, 'Unable to save settings.');
+			}
+		});
+		await this.saveQueue;
+	}
+
+	private reportError(error: unknown, fallback: string): void {
+		const message = error instanceof Error ? error.message : fallback;
+		this.errorEl?.setText(message);
+		new Notice(message);
+	}
+}

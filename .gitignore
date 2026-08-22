@@ -1,0 +1,26 @@
+# Editors
+.vscode/
+.idea/
+*.iml
+
+# Dependencies and generated output
+node_modules/
+main.js
+*.map
+coverage/
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+data.json
+
+# Local visual QA artifacts
+/audit-settings/
+/design-qa*.png
+/design-qa.md
+/qa-*.png
+
+# Operating system files
+.DS_Store
