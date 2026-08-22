@@ -1,8 +1,8 @@
-# Calendar View for Obsidian
+# Markdown Calendar View for Obsidian
 
-Calendar View is a local-first desktop plugin that projects ordinary Markdown notes onto a compact month or week calendar. Calendar definitions and events remain readable Markdown; the plugin does not use a private database, telemetry, cloud synchronization, or network requests.
+Markdown Calendar View is a local-first desktop plugin that projects ordinary Markdown notes onto a compact month or week calendar. Calendar definitions and events remain readable Markdown; the plugin does not use a private database, telemetry, cloud synchronization, or network requests.
 
-Each calendar lives in its own folder and uses a readable `_calendar.md` definition. Events remain ordinary Markdown notes that you can edit through Calendar View or directly in Obsidian.
+Each calendar lives in its own folder and uses a readable `_calendar.md` definition. Events remain ordinary Markdown notes that you can edit through Markdown Calendar View or directly in Obsidian.
 
 ## What works
 
@@ -19,22 +19,22 @@ Each calendar lives in its own folder and uses a readable `_calendar.md` definit
 
 ## Installation
 
-After Calendar View is published in the Community directory:
+After Markdown Calendar View is published in the Community directory:
 
 1. Open **Settings → Community plugins** in Obsidian.
-2. Select **Browse**, search for **Calendar View**, and select **Install**.
-3. Enable **Calendar View**.
+2. Select **Browse**, search for **Markdown Calendar View**, and select **Install**.
+3. Enable **Markdown Calendar View**.
 
 For manual or beta installation:
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the latest GitHub release.
-2. Create `<Vault>/.obsidian/plugins/calendar-view/`.
+2. Create `<Vault>/.obsidian/plugins/markdown-calendar-view/`.
 3. Copy the three release files into that directory.
-4. Reload Obsidian, then enable **Calendar View** under **Settings → Community plugins**.
+4. Reload Obsidian, then enable **Markdown Calendar View** under **Settings → Community plugins**.
 
 ## Getting started
 
-1. Run **Calendar View: Create calendar document** from the command palette.
+1. Run **Markdown Calendar View: Create calendar document** from the command palette.
 2. Choose a root folder and enter a calendar name. For example, root `Life` and name `Work` create `Life/Work/_calendar.md`.
 3. Open the calendar and use **New** or a day cell's **+** button to create an event.
 4. Open calendar settings to manage properties, Select options and colors, card fields, week start, and layout.
@@ -150,4 +150,4 @@ Use this checklist in a controllable Obsidian environment:
 
 ## Privacy and safety
 
-Calendar View runs locally. It reads Markdown metadata within each calendar folder and never uploads note contents, filenames, or properties. All event date changes use Obsidian's public frontmatter API. Deleting `_calendar.md` only closes its calendar view and removes plugin UI state; it never deletes event notes.
+Markdown Calendar View runs locally. It reads Markdown metadata within each calendar folder and never uploads note contents, filenames, or properties. All event date changes use Obsidian's public frontmatter API. Deleting `_calendar.md` only closes its calendar view and removes plugin UI state; it never deletes event notes.

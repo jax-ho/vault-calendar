@@ -1,7 +1,7 @@
 {
-	"id": "calendar-view",
-	"name": "Calendar View",
-	"version": "0.1.0",
+	"id": "markdown-calendar-view",
+	"name": "Markdown Calendar View",
+	"version": "0.1.1",
 	"minAppVersion": "1.13.7",
 	"description": "View and reschedule dated Markdown notes in local month and week calendars.",
 	"author": "Jax Ho",

@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-calendar-view",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"private": true,
 	"description": "A local-first calendar view for dated Markdown notes in Obsidian.",
 	"main": "main.js",
