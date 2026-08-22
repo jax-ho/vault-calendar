@@ -1,9 +1,9 @@
 {
-	"id": "markdown-calendar-view",
-	"name": "Markdown Calendar View",
-	"version": "0.1.1",
+	"id": "vault-calendar",
+	"name": "Vault Calendar",
+	"version": "0.1.2",
 	"minAppVersion": "1.13.7",
-	"description": "View and reschedule dated Markdown notes in local month and week calendars.",
+	"description": "Turn Markdown notes into a property-driven calendar with editable cards and start-to-end date ranges.",
 	"author": "Jax Ho",
 	"authorUrl": "https://github.com/jax-ho",
 	"isDesktopOnly": true

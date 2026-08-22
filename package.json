@@ -1,8 +1,8 @@
 {
-	"name": "obsidian-calendar-view",
-	"version": "0.1.1",
+	"name": "vault-calendar",
+	"version": "0.1.2",
 	"private": true,
-	"description": "A local-first calendar view for dated Markdown notes in Obsidian.",
+	"description": "A property-driven calendar for Markdown notes in Obsidian.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
@@ -19,12 +19,12 @@
 	"license": "0-BSD",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/jax-ho/obsidian-calendar-view.git"
+		"url": "git+https://github.com/jax-ho/vault-calendar.git"
 	},
 	"bugs": {
-		"url": "https://github.com/jax-ho/obsidian-calendar-view/issues"
+		"url": "https://github.com/jax-ho/vault-calendar/issues"
 	},
-	"homepage": "https://github.com/jax-ho/obsidian-calendar-view#readme",
+	"homepage": "https://github.com/jax-ho/vault-calendar#readme",
 	"engines": {
 		"node": ">=20.19.0"
 	},
