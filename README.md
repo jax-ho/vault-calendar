@@ -2,7 +2,7 @@
 
 Calendar View is a local-first desktop plugin that projects ordinary Markdown notes onto a compact month or week calendar. Calendar definitions and events remain readable Markdown; the plugin does not use a private database, telemetry, cloud synchronization, or network requests.
 
-Version `0.1.0` is a P0 implementation intended for local testing. It is not yet submitted to the Obsidian community plugin catalog.
+Each calendar lives in its own folder and uses a readable `_calendar.md` definition. Events remain ordinary Markdown notes that you can edit through Calendar View or directly in Obsidian.
 
 ## What works
 
@@ -16,6 +16,29 @@ Version `0.1.0` is a P0 implementation intended for local testing. It is not yet
 - Incremental create, modify, rename, and delete handling through Vault and Metadata Cache events.
 - Per-calendar and per-leaf focus/scroll state, including migration on calendar-document rename and cleanup on deletion.
 - Light/Dark theme support through Obsidian CSS variables.
+
+## Installation
+
+After Calendar View is published in the Community directory:
+
+1. Open **Settings → Community plugins** in Obsidian.
+2. Select **Browse**, search for **Calendar View**, and select **Install**.
+3. Enable **Calendar View**.
+
+For manual or beta installation:
+
+1. Download `main.js`, `manifest.json`, and `styles.css` from the latest GitHub release.
+2. Create `<Vault>/.obsidian/plugins/calendar-view/`.
+3. Copy the three release files into that directory.
+4. Reload Obsidian, then enable **Calendar View** under **Settings → Community plugins**.
+
+## Getting started
+
+1. Run **Calendar View: Create calendar document** from the command palette.
+2. Choose a root folder and enter a calendar name. For example, root `Life` and name `Work` create `Life/Work/_calendar.md`.
+3. Open the calendar and use **New** or a day cell's **+** button to create an event.
+4. Open calendar settings to manage properties, Select options and colors, card fields, week start, and layout.
+5. Select an event card to edit its title, dates, properties, and Markdown notes. Changes save automatically.
 
 ## Calendar documents
 
@@ -101,14 +124,6 @@ npm run check
 
 The production build creates `main.js` at the repository root. Automated tests cover configuration defaults and validation, source exclusions, date parsing, month/week grids, event projection, range segmentation, drag/resize calculations, stable sorting, state isolation and document lifecycle, duplicate creation refusal, conflict detection, and targeted frontmatter mutation.
 
-## Manual installation
-
-1. Run `npm install && npm run build`.
-2. Create `<Vault>/.obsidian/plugins/obsidian-calendar-view/` in a test vault.
-3. Copy `main.js`, `manifest.json`, and `styles.css` into that directory.
-4. Reload Obsidian, then enable **Calendar View** under **Settings → Community plugins**.
-5. Run **Calendar View: Create calendar document**. Only nested `_calendar.md` definitions can be opened as calendars.
-
 The public Obsidian API does not provide a safe way for this plugin to transparently replace only selected Markdown views. Calendar documents therefore remain normal Markdown in Source/Reading View and use a path-backed custom `ItemView` when opened through **Open calendar document**, **Open active file as calendar**, the ribbon button, or **Open as calendar** in the file menu. The source-note button in the calendar toolbar opens the underlying Markdown definition.
 
 ## Fixture vault and smoke test
@@ -126,13 +141,12 @@ Use this checklist in a controllable Obsidian environment:
 7. Test default Light and Dark themes and at least one community theme.
 8. Begin dragging a note, modify it externally, then drop and confirm the plugin refuses the stale write.
 
-## Known P0 limits
+## Current limitations
 
 - Search, filter, configurable multi-level sorting, continuous month scrolling, and comprehensive keyboard card navigation remain later work. Default ordering is deterministic: start date, title, then path.
 - Week view is an all-day seven-column layout, not an hourly schedule.
-- Mobile and touch-specific behavior are outside this desktop P0.
+- Mobile and touch-specific behavior are outside the current desktop release.
 - Note templates, recurring events, reminders, third-party calendar synchronization, and Obsidian Bases are not implemented.
-- Visual acceptance must still be performed inside Obsidian; automated DOM-free tests do not claim theme or drag-and-drop smoke-test coverage.
 
 ## Privacy and safety
 

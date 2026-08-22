@@ -48,4 +48,4 @@ calendar-layout: month
 calendar-open-behavior: same-leaf
 ---
 
-Fixture calendar for manual P0 smoke testing.
+Fixture calendar for manual smoke testing.
