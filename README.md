@@ -1,153 +1,265 @@
-# Vault Calendar for Obsidian
+# Vault Calendar
 
-Vault Calendar is a local-first desktop plugin that turns ordinary Markdown notes into a property-driven month or week calendar. Calendar definitions and events remain readable Markdown; the plugin does not use a private database, telemetry, cloud synchronization, or network requests.
+Turn Markdown notes into a visual calendar without moving your data out of Obsidian.
 
-Each calendar lives in its own folder and uses a readable `_calendar.md` definition. Events remain ordinary Markdown notes that you can edit through Vault Calendar or directly in Obsidian.
+Vault Calendar gives each event a familiar calendar card while keeping the source of truth in ordinary Markdown files. You can create and edit events from the calendar, organize them with properties, and schedule work across a single day or a date range.
 
-## What works
+## What you can do
 
-- Multiple named calendars, each defined by a dedicated `<root>/<calendar>/_calendar.md` document.
-- Recursive or direct-child event indexing inside each calendar's own folder, with excluded paths.
-- Reserved `title`, configurable start date, optional end date, visible properties, week start, layout, and open behavior.
-- Month and all-day week layouts with full weeks, adjacent-month days, today/focus states, navigation, and stable ordering.
-- Multi-day bars split across week boundaries, with calendar rows expanding to show every event card.
-- Native note opening, safe note creation, whole-range dragging, and start/end resizing.
-- `mtime` conflict detection and atomic `FileManager.processFrontMatter` updates that touch only mapped date fields.
-- Incremental create, modify, rename, and delete handling through Vault and Metadata Cache events.
-- Per-calendar and per-leaf focus/scroll state, including migration on calendar-document rename and cleanup on deletion.
-- Light/Dark theme support through Obsidian CSS variables.
+- Create multiple independent calendars inside one vault.
+- View events by month or by week.
+- Create events with a title, properties, and Markdown notes.
+- Edit an event in a focused popup with automatic saving.
+- Drag cards to move events to another date.
+- Resize cards to change their start and end dates.
+- Add Select, Checkbox, Text, and Number properties.
+- Give Select options their own colors and use one Select property to color cards.
+- Show existing Markdown notes when they contain the calendar's date property.
+- Keep everything local and readable in your vault.
+
+## Requirements
+
+- Obsidian 1.13.7 or later.
+- Desktop Obsidian. Mobile and touch interactions are not supported yet.
 
 ## Installation
 
-After Vault Calendar is published in the Community directory:
+### Community Plugins
 
-1. Open **Settings → Community plugins** in Obsidian.
-2. Select **Browse**, search for **Vault Calendar**, and select **Install**.
-3. Enable **Vault Calendar**.
+1. Open **Settings → Community plugins**.
+2. Select **Browse** and search for **Vault Calendar**.
+3. Select **Install**, then **Enable**.
 
-For manual or beta installation:
+If Vault Calendar does not appear in the Community Plugins browser yet, use the manual installation method below.
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the latest GitHub release.
-2. Create `<Vault>/.obsidian/plugins/vault-calendar/`.
-3. Copy the three release files into that directory.
-4. Reload Obsidian, then enable **Vault Calendar** under **Settings → Community plugins**.
+### Manual installation
 
-## Getting started
+1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/jax-ho/vault-calendar/releases/latest).
+2. In your vault, create `.obsidian/plugins/vault-calendar/`.
+3. Place the three downloaded files in that folder.
+4. Reload Obsidian.
+5. Open **Settings → Community plugins** and enable **Vault Calendar**.
 
-1. Run **Vault Calendar: Create calendar document** from the command palette.
-2. Choose a root folder and enter a calendar name. For example, root `Life` and name `Work` create `Life/Work/_calendar.md`.
-3. Open the calendar and use **New** or a day cell's **+** button to create an event.
-4. Open calendar settings to manage properties, Select options and colors, card fields, week start, and layout.
-5. Select an event card to edit its title, dates, properties, and Markdown notes. Changes save automatically.
+Community plugins are installed separately for each vault.
 
-## Calendar documents
+## Create your first calendar
 
-A calendar is a dedicated `_calendar.md` note inside its event folder. For example, choosing `Life` as the root and `Work` as the calendar name creates `Life/Work/_calendar.md`; all Work events also live under `Life/Work/`.
+1. Open the Command palette.
+2. Run **Vault Calendar: Create calendar document**.
+3. Enter a calendar name.
+4. Choose where in your vault the calendar should live.
+5. Select **Create**.
 
-`Life/Work/_calendar.md`:
+Vault Calendar creates a dedicated folder for the calendar and opens it immediately. The folder contains:
 
-```yaml
----
-title: Work calendar
-calendar-view: true
-calendar-recursive: true
-calendar-start-property: date
-calendar-end-property: date-end
-calendar-visible-properties:
-  - status
-  - type
-calendar-properties:
-  status:
-    type: select
-    options:
-      - None
-      - Not started
-      - In progress
-      - Done
-    colors:
-      None: default
-      Not started: gray
-      In progress: blue
-      Done: green
-    default: Not started
-  type:
-    type: select
-    options:
-      - None
-      - Task
-      - Learn
-      - Idea
-    colors:
-      None: default
-      Task: blue
-      Learn: green
-      Idea: purple
-    default: Task
-calendar-card-color-property: status
-calendar-week-starts-on: monday
-calendar-layout: month
-calendar-open-behavior: same-leaf
-calendar-exclude-paths:
-  - Life/Work/Archive
----
+- `_calendar.md`, which stores the calendar's settings.
+- The Markdown notes that appear as events.
+
+The resulting structure is:
+
+```text
+<chosen location>/
+└── <calendar name>/
+    ├── _calendar.md
+    └── event notes…
 ```
 
-The calendar name uses `_calendar.md`'s `title`, then falls back to the folder name. Event notes always use the reserved `title` frontmatter property for their title; it cannot be remapped or added as a custom property. The event source and creation folder are always the folder containing `_calendar.md`; they are not separate configuration values. `calendar-week-starts-on` accepts `locale`, `monday`, or `sunday`. An omitted `calendar-end-property` uses the default `date-end`; set it to an empty string to disable date-range resizing.
+You do not need to create or edit `_calendar.md` manually.
 
-`calendar-properties` is the per-calendar editor schema. Supported types are `text`, `number`, `checkbox`, and `select`; select fields store their choices in `options`, and `None` is always normalized as their first real option. Select `colors` use the Notion-style palette `default`, `gray`, `brown`, `orange`, `yellow`, `green`, `blue`, `purple`, `pink`, or `red`. Every type accepts an optional, type-checked `default`, and select defaults must match one of their options. Set `calendar-card-color-property` to a Select property such as `status` to color each event card from its current option. Schema fields automatically appear in the event editor, while `calendar-visible-properties` independently controls which fields appear on calendar cards. New event notes store configured defaults together with their property values.
+New calendars start with two properties:
 
-Every nested `_calendar.md` file is excluded from event indexes, even if its configuration is incomplete. Other filenames are ordinary notes even if they contain old `calendar-*` properties. A calendar's identity is its canonical `_calendar.md` path.
+- `status`: Not started, Blocked, In progress, Abandoned, or Done.
+- `type`: Task, Learn, or Idea.
 
-## Event date format
+You can change or remove these options and add your own properties later.
 
-The mapped start date is required for a note to appear. Accepted values are:
+## Open a calendar
 
-- A plain date such as `2026-08-17`.
-- An ISO 8601 date-time such as `2026-08-17T09:30:00+08:00`.
-- An equivalent YAML date value returned by Obsidian Properties.
+Use whichever method is most convenient:
 
-The authored calendar date portion of an ISO date-time is used for the all-day card. Invalid dates and end dates earlier than start dates are isolated and listed through the toolbar warning; they are never silently corrected. Event identity is the full note path, so same-title notes remain separate.
+- Select the calendar icon in the left ribbon. It opens your most recent calendar or lets you choose one.
+- Run **Vault Calendar: Open calendar document** from the Command palette.
+- Right-click a `_calendar.md` file and select **Open as calendar**.
+- Open `_calendar.md`, then run **Vault Calendar: Open active file as calendar**.
 
-## Build and test
+The document icon beside the calendar name opens the underlying `_calendar.md` source note.
 
-Node.js 20.19 or newer and npm are required.
+## Add an event
 
-```bash
-npm install
-npm run typecheck
-npm test
-npm run lint
-npm run build
-# Or run the complete local check:
-npm run check
+Move your pointer over a day and select the **+** button in its upper-left corner. You can also select **New** in the calendar toolbar to create an event on the currently focused date.
+
+Before creating the event, you can enter:
+
+- A title.
+- Values for the calendar's configured properties.
+- Markdown notes.
+
+Select **Create** when you are ready. The popup closes, the calendar stays open, and the new event appears immediately.
+
+Each event is saved as a separate Markdown note in the calendar folder. Vault Calendar adds a short unique suffix to the filename, so two events can use the same title without overwriting each other. The title displayed on the card comes from the note's `title` property, not from that suffix.
+
+## Edit an event
+
+Select an event card to open its editor. You can change:
+
+- Title.
+- Start date.
+- End date.
+- Custom properties.
+- Markdown notes.
+
+Changes save automatically. The editor shows **Saving…**, **Saved**, or **Not saved** so you always know the current state.
+
+Select **Open note** when you want the full Obsidian Markdown editor.
+
+## Move and resize events
+
+- Drag an event card to another day to move the complete event.
+- Drag the left or right edge of a card to change its start or end date.
+- Multi-day events continue across week boundaries automatically.
+
+Range resizing is available when the calendar has an end-date property configured. You can change or disable that property under **Calendar settings → Event fields**.
+
+## Customize a calendar
+
+Select the settings icon in the calendar toolbar. Settings save automatically and are specific to the current calendar.
+
+### Calendar
+
+- Rename the calendar.
+- Include or ignore notes in subfolders.
+- Exclude particular files or folders.
+
+### Event fields
+
+- Choose which Markdown property supplies the start date.
+- Choose the optional end-date property.
+
+The defaults are `date` and `date-end`.
+
+### Properties
+
+Properties define the fields available when you create or edit an event.
+
+Supported property types:
+
+- **Select**: a list of colored options.
+- **Checkbox**: a checked or unchecked value.
+- **Text**: a free-form text value.
+- **Number**: a numeric value.
+
+For every property, you can:
+
+- Set a default value for new events.
+- Show or hide it on event cards.
+- Change its position on cards.
+- Rename, edit, or delete it.
+
+For Select properties, you can also:
+
+- Add, rename, reorder, and delete options.
+- Assign a color to each option.
+- Choose the default option.
+
+Every Select property includes `None` as its required empty option. If an event contains an option that is no longer configured, the calendar safely treats it as `None`.
+
+The **Card color** setting links the event card background to one Select property. For example, linking card color to `status` lets Done, Blocked, and In progress events use their configured colors.
+
+Renaming a property through Calendar settings updates that property name in the calendar schema and in existing event notes. Deleting a property from the calendar does not remove the old value from existing notes.
+
+### View
+
+- Start the week on Monday or Sunday.
+- Use Month or Week layout.
+- Open full notes in the current leaf or in a new tab.
+
+You can also switch between Month and Week directly from the calendar toolbar.
+
+## Use existing Markdown notes
+
+Vault Calendar automatically includes Markdown notes inside the calendar folder when they contain a valid start-date property.
+
+With the default event fields, a note can look like this:
+
+```markdown
+---
+title: Prepare launch
+date: 2026-09-04
+date-end: 2026-09-06
+status: In progress
+type: Task
+---
+
+Review the checklist and prepare the announcement.
 ```
 
-The production build creates `main.js` at the repository root. Automated tests cover configuration defaults and validation, source exclusions, date parsing, month/week grids, event projection, range segmentation, drag/resize calculations, stable sorting, state isolation and document lifecycle, duplicate creation refusal, conflict detection, and targeted frontmatter mutation.
+The recommended date format is `YYYY-MM-DD`. ISO 8601 date-time values are also accepted, but Vault Calendar currently displays events as all-day cards.
 
-The public Obsidian API does not provide a safe way for this plugin to transparently replace only selected Markdown views. Calendar documents therefore remain normal Markdown in Source/Reading View and use a path-backed custom `ItemView` when opened through **Open calendar document**, **Open active file as calendar**, the ribbon button, or **Open as calendar** in the file menu. The source-note button in the calendar toolbar opens the underlying Markdown definition.
+The `title` property is reserved and always controls the event title. Other property names come from the calendar's Properties settings.
 
-## Fixture vault and smoke test
+You can edit event notes directly in Obsidian. Vault Calendar refreshes when a note is created, edited, renamed, or deleted.
 
-`fixtures/test-vault` contains a calendar, single-day sample, multi-day sample, same-title notes, and an invalid-date note. It is deliberately separate from any real vault.
+## Multiple calendars
 
-Use this checklist in a controllable Obsidian environment:
+Run **Vault Calendar: Create calendar document** again whenever you need another calendar. Each calendar has its own:
 
-1. Install the build artifacts into the fixture vault only.
-2. Open `Projects/WonderShare Work/_calendar.md` as a calendar and navigate to August 2026.
-3. Confirm `入职` appears on August 17 with `status` and `type`.
-4. Click it, then drag it to August 18 and verify only `date` changed.
-5. Resize `发布准备` from August 20 through August 22, then collapse it to one day and verify `date-end` is removed.
-6. Open a second calendar leaf, navigate independently, then rename the calendar document and reload Obsidian.
-7. Test default Light and Dark themes and at least one community theme.
-8. Begin dragging a note, modify it externally, then drop and confirm the plugin refuses the stale write.
+- Folder and event notes.
+- Date fields.
+- Property definitions and Select options.
+- Card colors.
+- View settings.
+
+This keeps unrelated calendars independent while allowing all of them to remain normal parts of the same vault.
+
+## Troubleshooting
+
+### My note does not appear
+
+Check that:
+
+- The note is inside the calendar folder.
+- **Include subfolders** is enabled if the note is in a nested folder.
+- The note is not covered by **Excluded paths**.
+- The configured start-date property exists and contains a valid date.
+
+The calendar toolbar shows an **unscheduled** button when it finds notes with missing or invalid date information.
+
+### I only see `_calendar.md` as a Markdown file
+
+Open it through the ribbon icon, **Open calendar document**, or **Open as calendar**. A normal click in the file explorer may open the underlying source note instead.
+
+### Can I edit `_calendar.md` myself?
+
+Yes, but Calendar settings is the safer interface. Manual changes are read literally. For example, manually changing a property name is treated as deleting the old property and adding a new one; Vault Calendar does not guess that it was a rename.
+
+### What happens if I delete `_calendar.md`?
+
+The calendar view is removed, but the other Markdown notes in its folder are not deleted.
+
+### Does Vault Calendar sync my events?
+
+Vault Calendar does not provide its own sync service. Your notes can still sync through Obsidian Sync, iCloud, Git, or any other method you already use for the vault.
 
 ## Current limitations
 
-- Search, filter, configurable multi-level sorting, continuous month scrolling, and comprehensive keyboard card navigation remain later work. Default ordering is deterministic: start date, title, then path.
-- Week view is an all-day seven-column layout, not an hourly schedule.
-- Mobile and touch-specific behavior are outside the current desktop release.
-- Note templates, recurring events, reminders, third-party calendar synchronization, and Obsidian Bases are not implemented.
+- Month and Week views are all-day layouts; there is no hourly schedule.
+- Search, filtering, recurring events, reminders, and configurable sorting are not available yet.
+- Google Calendar, Apple Calendar, and other external calendar services are not supported.
+- Mobile and touch-specific interactions are not supported.
 
-## Privacy and safety
+## Privacy and data ownership
 
-Vault Calendar runs locally. It reads Markdown metadata within each calendar folder and never uploads note contents, filenames, or properties. All event date changes use Obsidian's public frontmatter API. Deleting `_calendar.md` only closes its calendar view and removes plugin UI state; it never deletes event notes.
+Vault Calendar runs locally. It does not use telemetry, cloud storage, or network requests, and it never uploads your note contents, filenames, or properties.
+
+Your calendar definitions and events remain Markdown files that you can read, edit, move, back up, and version with normal Obsidian tools.
+
+## Support
+
+If something is not working as expected, [open an issue](https://github.com/jax-ho/vault-calendar/issues) and include:
+
+- Your Obsidian version.
+- Your operating system.
+- The steps needed to reproduce the problem.
+- A screenshot or error message, with private note content removed.
+
+Vault Calendar is released under the [0BSD license](https://github.com/jax-ho/vault-calendar/blob/main/LICENSE).
