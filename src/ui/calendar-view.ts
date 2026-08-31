@@ -82,6 +82,8 @@ export class CalendarView extends ItemView {
 	private dragSession?: DragSession;
 	private resizeSession?: ResizeSession;
 	private pendingScrollTop?: number;
+	private todayRefreshTimer?: number;
+	private todayRefreshWindow?: Window;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -89,6 +91,7 @@ export class CalendarView extends ItemView {
 	) {
 		super(leaf);
 		this.icon = 'calendar-days';
+		this.register(() => this.clearTodayRefreshTimer());
 	}
 
 	getViewType(): string {
@@ -133,6 +136,7 @@ export class CalendarView extends ItemView {
 
 	protected async onOpen(): Promise<void> {
 		this.opened = true;
+		this.scheduleTodayRefresh();
 		applyUiLocale(this.contentEl);
 		this.contentEl.addClass('calendar-view-root');
 		this.contentEl.tabIndex = 0;
@@ -140,6 +144,11 @@ export class CalendarView extends ItemView {
 		this.registerDomEvent(this.contentEl, 'keydown', (event) => this.handleKeydown(event));
 		const ownerWindow = this.contentEl.ownerDocument.defaultView;
 		if (ownerWindow) {
+			this.registerDomEvent(ownerWindow, 'focus', () => {
+				if (!this.opened) return;
+				this.refreshTodayHighlight();
+				this.scheduleTodayRefresh();
+			});
 			this.registerDomEvent(ownerWindow, 'pointermove', (event) => this.handlePointerMove(event));
 			this.registerDomEvent(ownerWindow, 'pointerup', (event) => {
 				void this.handlePointerUp(event);
@@ -151,6 +160,7 @@ export class CalendarView extends ItemView {
 
 	protected async onClose(): Promise<void> {
 		this.opened = false;
+		this.clearTodayRefreshTimer();
 		if (!this.calendarDeleted && this.calendarDocumentPath && this.instanceId && this.config) {
 			await this.plugin.stateStore.set(this.calendarDocumentPath, this.instanceId, {
 				focusDate: this.focusDate,
@@ -304,6 +314,37 @@ export class CalendarView extends ItemView {
 			this.contentEl.ownerDocument.defaultView?.requestAnimationFrame(() => {
 				this.contentEl.scrollTop = scrollTop;
 			});
+		}
+	}
+
+	private scheduleTodayRefresh(): void {
+		this.clearTodayRefreshTimer();
+		const ownerWindow = this.contentEl.ownerDocument.defaultView;
+		if (!ownerWindow || !this.opened) return;
+		const now = new Date();
+		const elapsedInMinute = now.getSeconds() * 1_000 + now.getMilliseconds();
+		const delay = 60_000 - elapsedInMinute + 100;
+		this.todayRefreshWindow = ownerWindow;
+		this.todayRefreshTimer = ownerWindow.setTimeout(() => {
+			this.todayRefreshTimer = undefined;
+			this.todayRefreshWindow = undefined;
+			if (!this.opened) return;
+			this.refreshTodayHighlight();
+			this.scheduleTodayRefresh();
+		}, delay);
+	}
+
+	private clearTodayRefreshTimer(): void {
+		if (this.todayRefreshTimer === undefined) return;
+		this.todayRefreshWindow?.clearTimeout(this.todayRefreshTimer);
+		this.todayRefreshTimer = undefined;
+		this.todayRefreshWindow = undefined;
+	}
+
+	private refreshTodayHighlight(): void {
+		const today = todayPlainDate();
+		for (const cell of this.contentEl.querySelectorAll<HTMLElement>('.cv-day-cell')) {
+			cell.toggleClass('is-today', cell.dataset.date === today);
 		}
 	}
 
