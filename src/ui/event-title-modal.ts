@@ -12,6 +12,7 @@ export class EventTitleModal extends Modal {
 	private title = '';
 	private body = '';
 	private readonly properties: Record<string, unknown>;
+	private creating = false;
 
 	constructor(
 		private readonly plugin: CalendarViewPlugin,
@@ -64,27 +65,6 @@ export class EventTitleModal extends Modal {
 			this.body = body.value;
 		});
 
-		const errorEl = this.contentEl.createDiv({
-			cls: 'cv-form-error cv-event-editor-error',
-		});
-		const actions = this.contentEl.createDiv({ cls: 'cv-event-create-actions' });
-		const createButton = actions.createEl('button', {
-			text: 'Create',
-			attr: { type: 'button' },
-		});
-		createButton.addEventListener('click', () => {
-			void this.create(errorEl, createButton);
-		});
-		title.addEventListener('keydown', (event) => {
-			if (event.key !== 'Enter' || event.metaKey || event.ctrlKey) return;
-			event.preventDefault();
-			void this.create(errorEl, createButton);
-		});
-		this.contentEl.addEventListener('keydown', (event) => {
-			if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return;
-			event.preventDefault();
-			void this.create(errorEl, createButton);
-		});
 		title.focus();
 	}
 
@@ -108,27 +88,30 @@ export class EventTitleModal extends Modal {
 		);
 	}
 
-	private async create(
-		errorEl: HTMLElement,
-		createButton: HTMLButtonElement,
+	close(): void {
+		if (this.creating) return;
+		this.creating = true;
+		void this.createAndClose(this.title, { ...this.properties }, this.body);
+	}
+
+	private async createAndClose(
+		title: string,
+		properties: Record<string, unknown>,
+		body: string,
 	): Promise<void> {
-		if (createButton.disabled) return;
-		errorEl.empty();
-		createButton.disabled = true;
 		try {
 			await this.plugin.documents.createEvent(
 				this.config,
-				this.title,
+				title,
 				this.date,
-				this.properties,
-				this.body,
+				properties,
+				body,
 			);
-			this.close();
+			super.close();
 		} catch (error) {
+			this.creating = false;
 			const message = error instanceof Error ? error.message : 'Unable to create note.';
-			errorEl.setText(message);
 			new Notice(message);
-			createButton.disabled = false;
 		}
 	}
 

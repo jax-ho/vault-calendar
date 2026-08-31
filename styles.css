@@ -1050,13 +1050,6 @@
 	box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
-.cv-event-create-actions {
-	align-items: center;
-	display: flex;
-	justify-content: flex-end;
-	padding-top: 8px;
-}
-
 /* Event editor */
 
 .cv-event-editor-modal {

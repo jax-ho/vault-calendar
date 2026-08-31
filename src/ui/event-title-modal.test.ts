@@ -19,6 +19,7 @@ const modalHarness = vi.hoisted(() => ({
 	closeCalls: 0,
 	elements: [] as MockElementRecord[],
 	icons: [] as string[],
+	notices: [] as string[],
 	propertyControls: [] as Array<{
 		property: string;
 		value: unknown;
@@ -98,12 +99,15 @@ vi.mock('obsidian', () => {
 
 			close(): void {
 				modalHarness.closeCalls += 1;
+				(this as unknown as { onClose?: () => void }).onClose?.();
 			}
 
 			setTitle(_title: string): void {}
 		},
 		Notice: class {
-			constructor(_message: string) {}
+			constructor(message: string) {
+				modalHarness.notices.push(message);
+			}
 		},
 	};
 });
@@ -156,10 +160,11 @@ describe('new event form', () => {
 		modalHarness.closeCalls = 0;
 		modalHarness.elements.length = 0;
 		modalHarness.icons.length = 0;
+		modalHarness.notices.length = 0;
 		modalHarness.propertyControls.length = 0;
 	});
 
-	it('renders a compact property form and saves the Markdown body', async () => {
+	it('renders a compact property form and creates the event once when closed', async () => {
 		const config = calendarConfig();
 		const file = { path: 'Life/Work/planning--7f3a9c00.md' };
 		const createEvent = vi.fn().mockResolvedValue(file);
@@ -170,7 +175,8 @@ describe('new event form', () => {
 			openAdapter: { openMarkdownFile },
 		} as unknown as CalendarViewPlugin;
 
-		new EventTitleModal(plugin, config, '2026-08-21').onOpen();
+		const modal = new EventTitleModal(plugin, config, '2026-08-21');
+		modal.onOpen();
 
 		expect(modalHarness.propertyControls.map(({ property }) => property)).toEqual([
 			'status',
@@ -209,11 +215,19 @@ describe('new event form', () => {
 		modalHarness.propertyControls.find(({ property }) => property === 'important')?.onChange(true);
 		modalHarness.propertyControls.find(({ property }) => property === 'estimate')?.onChange(3);
 
-		const createButton = findElement(
-			({ tag, options }) => tag === 'button' && options?.text === 'Create',
-		);
-		createButton.emit('click');
-		await vi.waitFor(() => expect(createEvent).toHaveBeenCalledOnce());
+		expect(
+			modalHarness.elements.some(
+				({ tag, options }) => tag === 'button' && options?.text === 'Create',
+			),
+		).toBe(false);
+
+		modal.close();
+		await vi.waitFor(() => {
+			expect(createEvent).toHaveBeenCalledOnce();
+			expect(modalHarness.closeCalls).toBe(1);
+		});
+		modal.close();
+		await Promise.resolve();
 
 		expect(createEvent).toHaveBeenCalledWith(
 			config,
@@ -229,5 +243,87 @@ describe('new event form', () => {
 		);
 		expect(modalHarness.closeCalls).toBe(1);
 		expect(openMarkdownFile).not.toHaveBeenCalled();
+	});
+
+	it('keeps the form open without creating when Enter is pressed in the title', async () => {
+		const createEvent = vi.fn().mockResolvedValue({
+			path: 'Life/Work/planning--7f3a9c00.md',
+		});
+		const plugin = {
+			app: {},
+			documents: { createEvent },
+			openAdapter: { openMarkdownFile: vi.fn() },
+		} as unknown as CalendarViewPlugin;
+
+		new EventTitleModal(plugin, calendarConfig(), '2026-08-21').onOpen();
+
+		const title = findElement(
+			({ options }) => options?.attr?.['aria-label'] === 'Event title',
+		);
+		title.value = 'Planning';
+		title.emit('input');
+		title.emit('keydown', { key: 'Enter', preventDefault: vi.fn() });
+		await Promise.resolve();
+
+		expect(createEvent).not.toHaveBeenCalled();
+		expect(modalHarness.closeCalls).toBe(0);
+	});
+
+	it('keeps the form open and allows another close attempt when creation fails', async () => {
+		const createEvent = vi
+			.fn()
+			.mockRejectedValueOnce(new Error('Unable to write event.'))
+			.mockResolvedValueOnce({ path: 'Life/Work/planning--7f3a9c00.md' });
+		const plugin = {
+			app: {},
+			documents: { createEvent },
+			openAdapter: { openMarkdownFile: vi.fn() },
+		} as unknown as CalendarViewPlugin;
+		const modal = new EventTitleModal(plugin, calendarConfig(), '2026-08-21');
+		modal.onOpen();
+
+		const title = findElement(
+			({ options }) => options?.attr?.['aria-label'] === 'Event title',
+		);
+		title.value = 'Planning';
+		title.emit('input');
+
+		modal.close();
+		await vi.waitFor(() =>
+			expect(modalHarness.notices).toEqual(['Unable to write event.']),
+		);
+		expect(modalHarness.closeCalls).toBe(0);
+
+		modal.close();
+		await vi.waitFor(() => {
+			expect(createEvent).toHaveBeenCalledTimes(2);
+			expect(modalHarness.closeCalls).toBe(1);
+		});
+	});
+
+	it('creates from the draft snapshot captured when closing starts', async () => {
+		let finishCreation: ((file: { path: string }) => void) | undefined;
+		const createEvent = vi.fn().mockImplementation(
+			() =>
+				new Promise<{ path: string }>((resolve) => {
+					finishCreation = resolve;
+				}),
+		);
+		const plugin = {
+			app: {},
+			documents: { createEvent },
+			openAdapter: { openMarkdownFile: vi.fn() },
+		} as unknown as CalendarViewPlugin;
+		const modal = new EventTitleModal(plugin, calendarConfig(), '2026-08-21');
+		modal.onOpen();
+
+		modal.close();
+		modalHarness.propertyControls.find(({ property }) => property === 'status')?.onChange('Done');
+
+		const capturedProperties = createEvent.mock.calls[0]?.[3] as Record<string, unknown>;
+		expect(capturedProperties.status).toBe('Not started');
+
+		finishCreation?.({ path: 'Life/Work/untitled--7f3a9c00.md' });
+		await vi.waitFor(() => expect(modalHarness.closeCalls).toBe(1));
 	});
 });
