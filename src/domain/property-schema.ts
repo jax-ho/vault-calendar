@@ -4,7 +4,7 @@ import type {
 	CalendarPropertyType,
 } from '../types';
 import { copyCalendarPropertyDefinition } from './calendar-copy';
-import { isReservedEventProperty } from './reserved-properties';
+import { reservedEventProperty } from './reserved-properties';
 
 function orderedVisibleProperties(
 	propertyDefinitions: Record<string, CalendarPropertyDefinition>,
@@ -36,8 +36,9 @@ export function validatePropertyName(
 ): string {
 	const trimmed = name.trim();
 	if (!trimmed) throw new Error('Enter a property name.');
-	if (isReservedEventProperty(trimmed)) {
-		throw new Error('Property name is reserved: title');
+	const reservedProperty = reservedEventProperty(trimmed);
+	if (reservedProperty) {
+		throw new Error(`Property name is reserved: ${reservedProperty}`);
 	}
 	const duplicate = Object.keys(propertyDefinitions).find(
 		(property) =>

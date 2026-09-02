@@ -24,6 +24,8 @@ function calendarConfig(): CalendarConfig {
 			title: { type: 'text', default: 'Reserved' },
 			date: { type: 'text', default: 'Reserved' },
 			'date-end': { type: 'text', default: 'Reserved' },
+			'parent-item': { type: 'text', default: '[[Reserved parent]]' },
+			'sub-items': { type: 'text', default: '[[Reserved child]]' },
 		},
 		weekStartsOn: 'monday',
 		layout: 'month',
@@ -34,8 +36,9 @@ function calendarConfig(): CalendarConfig {
 }
 
 describe('event creation property draft', () => {
-	it('uses configured defaults and concrete empty values for selects and checkboxes', () => {
+	it('includes the writable parent relation and excludes derived sub-items', () => {
 		expect(createEventPropertyDraft(calendarConfig())).toEqual({
+			'parent-item': undefined,
 			status: 'Not started',
 			type: 'None',
 			important: false,

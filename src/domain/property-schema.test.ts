@@ -10,6 +10,11 @@ import {
 	uniquePropertyName,
 	updateCalendarProperty,
 } from './property-schema';
+import {
+	EVENT_PARENT_ITEM_PROPERTY,
+	EVENT_SUB_ITEMS_PROPERTY,
+	FIXED_EVENT_PROPERTIES,
+} from './reserved-properties';
 
 function config(): CalendarConfig {
 	return {
@@ -82,12 +87,35 @@ describe('calendar property schema management', () => {
 		).toThrow('Property already exists: Status');
 	});
 
-	it('reserves title for the built-in event title field', () => {
+	it('publishes the fixed relationship contract', () => {
+		expect(FIXED_EVENT_PROPERTIES).toEqual({
+			[EVENT_PARENT_ITEM_PROPERTY]: {
+				type: 'relation',
+				cardinality: 'one',
+				storage: 'frontmatter',
+				writable: true,
+			},
+			[EVENT_SUB_ITEMS_PROPERTY]: {
+				type: 'relation',
+				cardinality: 'many',
+				storage: 'derived',
+				writable: false,
+			},
+		});
+	});
+
+	it('reserves built-in event fields with canonical error names', () => {
 		expect(() =>
 			addCalendarProperty(config(), 'title', createPropertyDefinition('text')),
 		).toThrow('Property name is reserved: title');
 		expect(() =>
 			renameCalendarProperty(config(), 'Status', 'TITLE'),
 		).toThrow('Property name is reserved: title');
+		expect(() =>
+			addCalendarProperty(config(), 'PARENT-ITEM', createPropertyDefinition('text')),
+		).toThrow('Property name is reserved: parent-item');
+		expect(() =>
+			renameCalendarProperty(config(), 'Status', 'Sub-Items'),
+		).toThrow('Property name is reserved: sub-items');
 	});
 });

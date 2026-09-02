@@ -2,8 +2,9 @@ import { Modal, Notice } from 'obsidian';
 import type { PlainDate } from '../domain/dates';
 import { createEventPropertyDraft } from '../domain/event-creation';
 import { resolvedPropertyType } from '../domain/property-type-icons';
+import { EVENT_PARENT_ITEM_PROPERTY } from '../domain/reserved-properties';
 import type CalendarViewPlugin from '../main';
-import type { CalendarConfig } from '../types';
+import type { CalendarConfig, CalendarItemReference } from '../types';
 import { renderEventFieldLabel } from './event-field-label';
 import { renderEventPropertyInput } from './event-property-input';
 import { applyUiLocale } from './ui-locale';
@@ -18,6 +19,7 @@ export class EventTitleModal extends Modal {
 		private readonly plugin: CalendarViewPlugin,
 		private readonly config: CalendarConfig,
 		private readonly date: PlainDate,
+		private readonly parentItems: readonly CalendarItemReference[] = [],
 	) {
 		super(plugin.app);
 		this.properties = createEventPropertyDraft(config);
@@ -73,8 +75,10 @@ export class EventTitleModal extends Modal {
 		const definition = this.config.propertyDefinitions[property];
 		renderEventFieldLabel(
 			row,
-			property,
-			resolvedPropertyType(definition, this.properties[property]),
+			property === EVENT_PARENT_ITEM_PROPERTY ? 'Parent item' : property,
+			property === EVENT_PARENT_ITEM_PROPERTY
+				? 'relation'
+				: resolvedPropertyType(definition, this.properties[property]),
 		);
 		const control = row.createDiv({ cls: 'cv-event-editor-field-control' });
 		renderEventPropertyInput(
@@ -85,6 +89,7 @@ export class EventTitleModal extends Modal {
 			(value) => {
 				this.properties[property] = value;
 			},
+			this.parentItems,
 		);
 	}
 

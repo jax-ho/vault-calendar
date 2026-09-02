@@ -12,6 +12,7 @@ function item(path: string, start: string, end?: string): CalendarItem {
 		allDay: true,
 		properties: {},
 		mtime: 1,
+		subItems: [],
 	};
 	if (end) result.end = end;
 	return result;

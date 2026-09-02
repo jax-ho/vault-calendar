@@ -131,6 +131,9 @@ export default class CalendarViewPlugin extends Plugin {
 			this.app.metadataCache.on('changed', (file) => this.handleFileChanged(file)),
 		);
 		this.registerEvent(
+			this.app.metadataCache.on('resolved', () => this.indexes.handleLinksResolved()),
+		);
+		this.registerEvent(
 			this.app.vault.on('rename', (file, oldPath) => {
 				if (file instanceof TFile) void this.handleFileRenamed(file, oldPath);
 			}),

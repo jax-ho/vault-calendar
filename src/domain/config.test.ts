@@ -213,18 +213,76 @@ describe('calendar document configuration', () => {
 		expect(frontmatter['calendar-create-folder']).toBeUndefined();
 	});
 
-	it('treats title as a fixed reserved field', () => {
+	it('filters fixed event fields from the configurable property schema', () => {
 		const result = parseCalendarConfig('Life/Work/_calendar.md', {
 			'calendar-view': true,
 			'calendar-title-property': 'name',
+			'calendar-visible-properties': ['title', 'parent-item', 'sub-items', 'status'],
 			'calendar-properties': {
 				title: { type: 'text', default: 'Custom title' },
+				'parent-item': { type: 'text', default: '[[Parent]]' },
+				'sub-items': { type: 'text', default: '[[Child]]' },
 				status: { type: 'select', options: ['None', 'Done'] },
 			},
 		});
 
 		expect(result.issues).toEqual([]);
-		expect(result.config?.propertyDefinitions.title).toBeUndefined();
-		expect(result.config?.propertyDefinitions.status).toBeDefined();
+		expect(result.config?.visibleProperties).toEqual(['status']);
+		expect(result.config?.propertyDefinitions).toEqual({
+			status: {
+				type: 'select',
+				options: ['None', 'Done'],
+				colors: { None: 'default', Done: 'default' },
+			},
+		});
+	});
+
+	it('never writes fixed event fields into configurable calendar keys', () => {
+		const parsed = parseCalendarConfig('Life/Work/_calendar.md', {
+			'calendar-view': true,
+		});
+		if (!parsed.config) throw new Error('Expected a valid config');
+		const frontmatter: Record<string, unknown> = {};
+		const config = {
+			...parsed.config,
+			visibleProperties: [
+				...parsed.config.visibleProperties,
+				'parent-item',
+				'sub-items',
+			],
+			propertyDefinitions: {
+				...parsed.config.propertyDefinitions,
+				'parent-item': { type: 'text' as const },
+				'sub-items': { type: 'text' as const },
+			},
+			cardColorProperty: 'parent-item',
+		};
+
+		applyCalendarConfigToFrontmatter(frontmatter, config);
+
+		expect(frontmatter['calendar-visible-properties']).toEqual(['status', 'type']);
+		expect(frontmatter['calendar-properties']).not.toHaveProperty('parent-item');
+		expect(frontmatter['calendar-properties']).not.toHaveProperty('sub-items');
+		expect(frontmatter['calendar-card-color-property']).toBe('');
+	});
+
+	it('rejects fixed event fields as date property names', () => {
+		const result = parseCalendarConfig('Life/Work/_calendar.md', {
+			'calendar-view': true,
+			'calendar-start-property': 'parent-item',
+			'calendar-end-property': 'sub-items',
+		});
+
+		expect(result.config).toBeUndefined();
+		expect(result.issues).toEqual([
+			{
+				field: 'calendar-start-property',
+				message: 'Must not use a reserved event property.',
+			},
+			{
+				field: 'calendar-end-property',
+				message: 'Must not use a reserved event property.',
+			},
+		]);
 	});
 });

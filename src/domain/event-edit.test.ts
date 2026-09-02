@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	applyEventEditDraft,
 	createEventEditDraft,
+	validateEventEditDraft,
 	type EventFieldMapping,
 } from './event-edit';
 
@@ -24,6 +25,8 @@ describe('event edit draft', () => {
 				'date-end': '2026-08-22',
 				status: 'Done',
 				important: true,
+				'parent-item': '[[Roadmap]]',
+				'sub-items': ['[[Ignored child]]'],
 			},
 			'Body text',
 			mapping,
@@ -34,7 +37,11 @@ describe('event edit draft', () => {
 			title: 'Launch',
 			start: '2026-08-20',
 			end: '2026-08-22',
-			properties: { status: 'Done', important: true },
+			properties: {
+				'parent-item': '[[Roadmap]]',
+				status: 'Done',
+				important: true,
+			},
 			body: 'Body text',
 		});
 	});
@@ -53,7 +60,11 @@ describe('event edit draft', () => {
 			{ title: 'Fallback', start: '2026-08-01' },
 		);
 
-		expect(draft.properties).toEqual({ status: 'Not started', important: false });
+		expect(draft.properties).toEqual({
+			'parent-item': undefined,
+			status: 'Not started',
+			important: false,
+		});
 	});
 
 	it('resolves a deleted select option to None and persists None on the next save', () => {
@@ -89,7 +100,94 @@ describe('event edit draft', () => {
 			{ title: 'Fallback', start: '2026-08-01' },
 		);
 
-		expect(draft.properties).toEqual({ status: 'None', important: undefined, effort: 3 });
+		expect(draft.properties).toEqual({
+			'parent-item': undefined,
+			status: 'None',
+			important: undefined,
+			effort: 3,
+		});
+	});
+
+	it('writes one parent item and never writes derived sub-items', () => {
+		const frontmatter: Record<string, unknown> = {
+			title: 'Launch',
+			date: '2026-08-20',
+			'parent-item': '[[Old parent]]',
+			'sub-items': ['[[Authored child]]'],
+		};
+
+		applyEventEditDraft(
+			frontmatter,
+			{
+				title: 'Launch',
+				start: '2026-08-20',
+				end: '',
+				properties: {
+					'parent-item': '  [[New parent]]  ',
+					'sub-items': ['[[Draft child]]'],
+				},
+				body: '',
+			},
+			{
+				...mapping,
+				visibleProperties: [...mapping.visibleProperties, 'sub-items'],
+				propertyDefinitions: {
+					...mapping.propertyDefinitions,
+					'sub-items': { type: 'text' },
+				},
+			},
+		);
+
+		expect(frontmatter['parent-item']).toBe('[[New parent]]');
+		expect(frontmatter['sub-items']).toEqual(['[[Authored child]]']);
+
+		applyEventEditDraft(
+			frontmatter,
+			{
+				title: 'Launch',
+				start: '2026-08-20',
+				end: '',
+				properties: { 'parent-item': '   ' },
+				body: '',
+			},
+			mapping,
+		);
+		expect(frontmatter).not.toHaveProperty('parent-item');
+		expect(frontmatter['sub-items']).toEqual(['[[Authored child]]']);
+	});
+
+	it('rejects parent values that are not one wikilink', () => {
+		expect(() =>
+			validateEventEditDraft(
+				{
+					title: 'Launch',
+					start: '2026-08-20',
+					end: '',
+					properties: { 'parent-item': 'Roadmap' },
+					body: '',
+				},
+				mapping,
+			),
+		).toThrow('Parent item must be one Obsidian wikilink.');
+	});
+
+	it('delegates graph validation for a well-formed parent link', () => {
+		const validateParentItem = vi.fn(() => {
+			throw new Error('A parent item cannot be one of its sub-items.');
+		});
+		expect(() =>
+			validateEventEditDraft(
+				{
+					title: 'Launch',
+					start: '2026-08-20',
+					end: '',
+					properties: { 'parent-item': '  [[Child]]  ' },
+					body: '',
+				},
+				{ ...mapping, validateParentItem },
+			),
+		).toThrow('A parent item cannot be one of its sub-items.');
+		expect(validateParentItem).toHaveBeenCalledWith('[[Child]]');
 	});
 
 	it('updates only configured fields and preserves authored start times', () => {

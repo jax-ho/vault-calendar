@@ -140,9 +140,9 @@ describe('calendar item projection', () => {
 
 	it('keeps same-title notes distinct and sorts by start, title, then path', () => {
 		const items = [
-			{ path: 'B.md', title: 'Same', start: '2026-08-18', startTimeSort: 0, allDay: true, properties: {}, mtime: 1 },
-			{ path: 'Z.md', title: 'Same', start: '2026-08-17', startTimeSort: 0, allDay: true, properties: {}, mtime: 1 },
-			{ path: 'A.md', title: 'Same', start: '2026-08-17', startTimeSort: 0, allDay: true, properties: {}, mtime: 1 },
+			{ path: 'B.md', title: 'Same', start: '2026-08-18', startTimeSort: 0, allDay: true, properties: {}, mtime: 1, subItems: [] },
+			{ path: 'Z.md', title: 'Same', start: '2026-08-17', startTimeSort: 0, allDay: true, properties: {}, mtime: 1, subItems: [] },
+			{ path: 'A.md', title: 'Same', start: '2026-08-17', startTimeSort: 0, allDay: true, properties: {}, mtime: 1, subItems: [] },
 		];
 		expect(sortCalendarItems(items).map((item) => item.path)).toEqual(['A.md', 'Z.md', 'B.md']);
 	});

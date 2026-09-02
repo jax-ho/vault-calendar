@@ -441,6 +441,50 @@
 	white-space: nowrap;
 }
 
+.cv-card-relationships {
+	display: flex;
+	flex: 0 0 auto;
+	flex-direction: column;
+	gap: 4px;
+	line-height: 18px;
+	min-width: 0;
+	overflow: hidden;
+	width: 100%;
+}
+
+.cv-card-relationship {
+	align-items: center;
+	color: var(--text-muted);
+	display: flex;
+	font-size: var(--font-ui-smaller);
+	gap: 5px;
+	min-height: 18px;
+	min-width: 0;
+	width: 100%;
+}
+
+.cv-card-relationship-icon {
+	align-items: center;
+	display: inline-flex;
+	flex: 0 0 13px;
+	height: 13px;
+	justify-content: center;
+	width: 13px;
+}
+
+.cv-card-relationship-icon svg {
+	height: 13px;
+	stroke-width: 1.8;
+	width: 13px;
+}
+
+.cv-card-relationship-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .cv-card-properties {
 	align-items: flex-start;
 	display: flex;
@@ -1179,6 +1223,31 @@
 
 .cv-event-editor-field-control {
 	min-width: 0;
+}
+
+.cv-event-parent-item-select {
+	font-family: var(--font-interface);
+	width: min(100%, 360px);
+}
+
+.cv-event-sub-items {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.cv-event-relation-chip {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 22px;
+	max-width: 100%;
+	overflow: hidden;
+	padding: 0 9px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .cv-colored-select {

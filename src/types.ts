@@ -53,6 +53,11 @@ export interface CalendarConfigResult {
 	issues: ConfigIssue[];
 }
 
+export interface CalendarItemReference {
+	path: string;
+	title: string;
+}
+
 export interface CalendarItem {
 	path: string;
 	title: string;
@@ -63,6 +68,8 @@ export interface CalendarItem {
 	properties: Record<string, unknown>;
 	color?: CalendarColor;
 	mtime: number;
+	parentItem?: CalendarItemReference;
+	subItems: CalendarItemReference[];
 }
 
 export type ProjectionIssueKind =
@@ -71,6 +78,7 @@ export type ProjectionIssueKind =
 	| 'invalid-end'
 	| 'end-before-start'
 	| 'metadata-unavailable'
+	| 'invalid-parent-item'
 	| 'parse-error';
 
 export interface ProjectionIssue {

@@ -8,6 +8,8 @@ describe('property type icons', () => {
 		expect(propertyTypeIcon('checkbox')).toBe('square-check-big');
 		expect(propertyTypeIcon('text')).toBe('type');
 		expect(propertyTypeIcon('number')).toBe('hash');
+		expect(propertyTypeIcon('relation')).toBe('corner-down-right');
+		expect(propertyTypeIcon('relations')).toBe('list-tree');
 	});
 
 	it('uses schema types first and infers unconfigured values', () => {

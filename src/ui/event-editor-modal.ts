@@ -5,9 +5,14 @@ import {
 	type EventFieldMapping,
 } from '../domain/event-edit';
 import { resolvedPropertyType } from '../domain/property-type-icons';
+import { EVENT_PARENT_ITEM_PROPERTY } from '../domain/reserved-properties';
 import type CalendarViewPlugin from '../main';
 import type { EventEditSession } from '../services/event-editor';
-import type { CalendarConfig, CalendarItem } from '../types';
+import type {
+	CalendarConfig,
+	CalendarItem,
+	CalendarItemReference,
+} from '../types';
 import { configurePickerOnlyDateInput } from './date-picker-input';
 import { renderEventFieldLabel } from './event-field-label';
 import { renderEventPropertyInput } from './event-property-input';
@@ -15,12 +20,21 @@ import { applyUiLocale } from './ui-locale';
 
 const SAVE_DELAY_MS = 450;
 
-function fieldMapping(config: CalendarConfig): EventFieldMapping {
+interface EventEditorRelationContext {
+	parentItems: readonly CalendarItemReference[];
+	validateParentItem?: (value: string | undefined) => void;
+}
+
+function fieldMapping(
+	config: CalendarConfig,
+	validateParentItem?: (value: string | undefined) => void,
+): EventFieldMapping {
 	return {
 		startDateProperty: config.startDateProperty,
 		endDateProperty: config.endDateProperty,
 		visibleProperties: config.visibleProperties,
 		propertyDefinitions: config.propertyDefinitions,
+		validateParentItem,
 	};
 }
 
@@ -41,9 +55,12 @@ export class EventEditorModal extends Modal {
 		private readonly plugin: CalendarViewPlugin,
 		private readonly config: CalendarConfig,
 		private readonly item: CalendarItem,
+		private readonly relations: EventEditorRelationContext = {
+			parentItems: [],
+		},
 	) {
 		super(plugin.app);
-		this.mapping = fieldMapping(config);
+		this.mapping = fieldMapping(config, relations.validateParentItem);
 	}
 
 	async onOpen(): Promise<void> {
@@ -111,6 +128,7 @@ export class EventEditorModal extends Modal {
 		for (const property of Object.keys(this.draft.properties)) {
 			this.renderPropertyField(fields, property, this.draft.properties[property]);
 		}
+		this.renderSubItemsField(fields);
 
 		this.contentEl.createDiv({ cls: 'cv-event-editor-divider' });
 		const bodyLabel = this.contentEl.createEl('label', {
@@ -171,7 +189,13 @@ export class EventEditorModal extends Modal {
 		if (!this.draft) return;
 		const row = container.createDiv({ cls: 'cv-event-editor-field' });
 		const definition = this.mapping.propertyDefinitions[property];
-		renderEventFieldLabel(row, property, resolvedPropertyType(definition, value));
+		renderEventFieldLabel(
+			row,
+			property === EVENT_PARENT_ITEM_PROPERTY ? 'Parent item' : property,
+			property === EVENT_PARENT_ITEM_PROPERTY
+				? 'relation'
+				: resolvedPropertyType(definition, value),
+		);
 		const control = row.createDiv({ cls: 'cv-event-editor-field-control' });
 		renderEventPropertyInput(
 			control,
@@ -182,7 +206,28 @@ export class EventEditorModal extends Modal {
 				if (this.draft) this.draft.properties[property] = nextValue;
 				this.queueSave();
 			},
+			this.relations.parentItems,
 		);
+	}
+
+	private renderSubItemsField(container: HTMLElement): void {
+		const row = container.createDiv({ cls: 'cv-event-editor-field' });
+		renderEventFieldLabel(row, 'Sub-items', 'relations');
+		const value = row.createDiv({
+			cls: 'cv-event-editor-field-control cv-event-sub-items',
+		});
+		if (this.item.subItems.length === 0) {
+			value.createSpan({
+				cls: 'cv-event-property-readonly',
+				text: 'No sub-items',
+			});
+			return;
+		}
+		for (const item of this.item.subItems) {
+			const chip = value.createSpan({ cls: 'cv-event-relation-chip' });
+			chip.setAttribute('title', item.path);
+			chip.createSpan({ text: item.title });
+		}
 	}
 
 	private queueSave(): void {

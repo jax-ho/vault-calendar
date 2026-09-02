@@ -119,6 +119,21 @@ describe('calendar document file layout', () => {
 		).rejects.toThrow('Calendars require a dedicated folder.');
 	});
 
+	it('refuses fixed relationship fields as calendar date properties', async () => {
+		const { app, create } = createTestApp();
+		await expect(
+			new CalendarDocumentService(app).create({
+				name: 'Work',
+				documentFolder: 'Life/Work',
+				startDateProperty: 'parent-item',
+				endDateProperty: 'sub-items',
+			}),
+		).rejects.toThrow(
+			'Start date property cannot use a reserved event property.',
+		);
+		expect(create).not.toHaveBeenCalled();
+	});
+
 	it('creates duplicate display titles with different short-ID filenames', async () => {
 		const ids = ['7f3A', 'b82D'];
 		const { app, create } = createTestApp();
@@ -163,5 +178,41 @@ describe('calendar document file layout', () => {
 		expect(create.mock.calls[0]?.[1]).toContain(
 			'---\n\n## Agenda\n\n- Review roadmap',
 		);
+	});
+
+	it('persists one parent item without writing derived sub-items', async () => {
+		const { app, create } = createTestApp();
+		const service = new CalendarDocumentService(app, () => '7f3A');
+
+		await service.createEvent(calendarConfig(), 'child', '2026-08-21', {
+			'parent-item': '  [[Life/Work/parent--2abC]]  ',
+			'sub-items': ['[[Life/Work/grandchild--9xyZ]]'],
+		});
+
+		const content = create.mock.calls[0]?.[1] as string;
+		expect(content).toContain(
+			'"parent-item":"[[Life/Work/parent--2abC]]"',
+		);
+		expect(content).not.toContain('sub-items');
+	});
+
+	it('refuses to create an event when a date field conflicts with a fixed relation field', async () => {
+		const { app, create, createFolder } = createTestApp();
+		const config = {
+			...calendarConfig(),
+			startDateProperty: 'parent-item',
+		};
+
+		await expect(
+			new CalendarDocumentService(app).createEvent(
+				config,
+				'child',
+				'2026-08-21',
+			),
+		).rejects.toThrow(
+			'Start date property cannot use a reserved event property.',
+		);
+		expect(createFolder).not.toHaveBeenCalled();
+		expect(create).not.toHaveBeenCalled();
 	});
 });

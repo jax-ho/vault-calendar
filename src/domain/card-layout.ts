@@ -10,11 +10,14 @@ const CARD_GAP = 6;
 
 export function calendarCardMetrics(
 	visiblePropertyCount: number,
+	relationshipRowCount = 0,
 ): CalendarCardMetrics {
-	const count = Math.max(0, Math.floor(visiblePropertyCount));
+	const propertyCount = Math.max(0, Math.floor(visiblePropertyCount));
+	const relationCount = Math.max(0, Math.floor(relationshipRowCount));
+	const rowCount = propertyCount + relationCount;
 	const height = Math.max(
 		MINIMUM_CARD_HEIGHT,
-		CARD_VERTICAL_PADDING_AND_TITLE + count * PROPERTY_ROW_STEP,
+		CARD_VERTICAL_PADDING_AND_TITLE + rowCount * PROPERTY_ROW_STEP,
 	);
 	return { height, step: height + CARD_GAP };
 }

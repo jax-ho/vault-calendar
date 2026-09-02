@@ -31,7 +31,7 @@ function issue(
 	return { issue: { path, kind, message } };
 }
 
-function titleFromValue(value: unknown, fallback: string): string {
+export function calendarItemTitle(value: unknown, fallback: string): string {
 	if (typeof value === 'string' && value.trim().length > 0) return value.trim();
 	if (typeof value === 'number') return String(value);
 	return fallback;
@@ -115,13 +115,14 @@ export function projectCalendarFile(
 	const properties = copyProperties(file.frontmatter, config);
 	const item: CalendarItem = {
 		path: file.path,
-		title: titleFromValue(file.frontmatter[EVENT_TITLE_PROPERTY], file.basename),
+		title: calendarItemTitle(file.frontmatter[EVENT_TITLE_PROPERTY], file.basename),
 		start,
 		startTimeSort,
 		allDay: true,
 		properties,
 		color: calendarCardColor(config, properties),
 		mtime: file.mtime,
+		subItems: [],
 	};
 	if (end && end !== start) item.end = end;
 	return { item };

@@ -1,4 +1,4 @@
-import type { App } from 'obsidian';
+import { setIcon, type App } from 'obsidian';
 import { selectOptionColor } from '../domain/calendar-colors';
 import type {
 	CalendarItem,
@@ -6,6 +6,72 @@ import type {
 } from '../types';
 
 const INTERNAL_LINK_PATTERN = /^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/u;
+
+function parentItemTitle(item: CalendarItem): string | undefined {
+	const parent = item.parentItem;
+	if (!parent) return undefined;
+	return parent.title.trim() || parent.path;
+}
+
+function subItemCountLabel(count: number): string {
+	return `${count} ${count === 1 ? 'sub-item' : 'sub-items'}`;
+}
+
+export function calendarRelationshipRowCount(item: CalendarItem): number {
+	return Number(Boolean(item.parentItem)) + Number(item.subItems.length > 0);
+}
+
+export function calendarRelationshipAccessibleSummary(item: CalendarItem): string {
+	const parts: string[] = [];
+	const parentTitle = parentItemTitle(item);
+	if (parentTitle) parts.push(`Parent item: ${parentTitle}`);
+	if (item.subItems.length > 0) {
+		parts.push(subItemCountLabel(item.subItems.length));
+	}
+	return parts.join(', ');
+}
+
+function renderRelationshipIcon(
+	row: HTMLElement,
+	iconName: 'corner-down-right' | 'list-tree',
+): void {
+	const icon = row.createSpan({ cls: 'cv-card-relationship-icon' });
+	icon.setAttribute('aria-hidden', 'true');
+	setIcon(icon, iconName);
+}
+
+export function renderCardRelationships(
+	card: HTMLElement,
+	item: CalendarItem,
+): void {
+	if (calendarRelationshipRowCount(item) === 0) return;
+
+	const relationships = card.createDiv({ cls: 'cv-card-relationships' });
+	const parentTitle = parentItemTitle(item);
+	if (item.parentItem && parentTitle) {
+		card.addClass('has-parent');
+		const row = relationships.createDiv({
+			cls: 'cv-card-relationship is-parent',
+		});
+		row.dataset.path = item.parentItem.path;
+		renderRelationshipIcon(row, 'corner-down-right');
+		const text = `Parent: ${parentTitle}`;
+		row.createSpan({ cls: 'cv-card-relationship-text', text });
+		row.setAttribute('title', text);
+	}
+
+	if (item.subItems.length > 0) {
+		card.addClass('has-sub-items');
+		const row = relationships.createDiv({
+			cls: 'cv-card-relationship is-sub-items',
+		});
+		row.dataset.count = String(item.subItems.length);
+		renderRelationshipIcon(row, 'list-tree');
+		const text = subItemCountLabel(item.subItems.length);
+		row.createSpan({ cls: 'cv-card-relationship-text', text });
+		row.setAttribute('title', text);
+	}
+}
 
 function propertyDisplayName(property: string): string {
 	const words = property.replaceAll(/[-_]+/gu, ' ');

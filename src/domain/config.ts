@@ -367,6 +367,12 @@ export function parseCalendarConfig(
 
 	const issues: ConfigIssue[] = [];
 	const calendarFolder = calendarFolderFromDocumentPath(normalizedDocumentPath);
+	const rawStartProperty = stringValue(
+		frontmatter,
+		CALENDAR_KEYS.startDateProperty,
+		'date',
+		issues,
+	);
 	const rawEndProperty = stringValue(
 		frontmatter,
 		CALENDAR_KEYS.endDateProperty,
@@ -374,6 +380,18 @@ export function parseCalendarConfig(
 		issues,
 		true,
 	);
+	if (isReservedEventProperty(rawStartProperty)) {
+		issues.push({
+			field: CALENDAR_KEYS.startDateProperty,
+			message: 'Must not use a reserved event property.',
+		});
+	}
+	if (rawEndProperty && isReservedEventProperty(rawEndProperty)) {
+		issues.push({
+			field: CALENDAR_KEYS.endDateProperty,
+			message: 'Must not use a reserved event property.',
+		});
+	}
 	const rawTitle = frontmatter.title;
 	const folderName = calendarFolder.split('/').at(-1) ?? '_calendar';
 	const name =
@@ -431,12 +449,7 @@ export function parseCalendarConfig(
 			true,
 			issues,
 		),
-		startDateProperty: stringValue(
-			frontmatter,
-			CALENDAR_KEYS.startDateProperty,
-			'date',
-			issues,
-		),
+		startDateProperty: rawStartProperty,
 		visibleProperties,
 		propertyDefinitions,
 		cardColorProperty,
@@ -497,7 +510,10 @@ export function applyCalendarConfigToFrontmatter(
 			),
 		),
 	);
-	frontmatter[CALENDAR_KEYS.cardColorProperty] = config.cardColorProperty ?? '';
+	frontmatter[CALENDAR_KEYS.cardColorProperty] =
+		config.cardColorProperty && !isReservedEventProperty(config.cardColorProperty)
+			? config.cardColorProperty
+			: '';
 	frontmatter[CALENDAR_KEYS.weekStartsOn] = config.weekStartsOn;
 	frontmatter[CALENDAR_KEYS.layout] = config.layout;
 	frontmatter[CALENDAR_KEYS.openBehavior] = config.openBehavior;

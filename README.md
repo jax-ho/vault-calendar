@@ -9,6 +9,7 @@ Vault Calendar gives each event a familiar calendar card while keeping the sourc
 - Create multiple independent calendars inside one vault.
 - View events by month or by week.
 - Create events with a title, properties, and Markdown notes.
+- Organize tasks with one parent item and any number of derived sub-items.
 - Edit an event in a focused popup with automatic saving.
 - Drag cards to move events to another date.
 - Resize cards to change their start and end dates.
@@ -105,8 +106,14 @@ Select an event card to open its editor. You can change:
 - Title.
 - Start date.
 - End date.
+- Parent item.
 - Custom properties.
 - Markdown notes.
+
+`parent-item` and `sub-items` are fixed relationship fields. Choose a parent item
+with an Obsidian wikilink; Vault Calendar derives the parent's sub-items from
+those links and shows the relationship on both cards. `sub-items` is read-only
+and is not duplicated into note frontmatter.
 
 Changes save automatically. The editor shows **Saving…**, **Saved**, or **Not saved** so you always know the current state.
 
@@ -188,6 +195,7 @@ date: 2026-09-04
 date-end: 2026-09-06
 status: In progress
 type: Task
+parent-item: "[[Projects/Launch/Quarterly roadmap]]"
 ---
 
 Review the checklist and prepare the announcement.
@@ -195,7 +203,10 @@ Review the checklist and prepare the announcement.
 
 The recommended date format is `YYYY-MM-DD`. ISO 8601 date-time values are also accepted, but Vault Calendar currently displays events as all-day cards.
 
-The `title` property is reserved and always controls the event title. Other property names come from the calendar's Properties settings.
+The `title`, `parent-item`, and `sub-items` properties are reserved. `title`
+controls the event title, `parent-item` stores one wikilink, and `sub-items` is
+derived by Vault Calendar. Other property names come from the calendar's
+Properties settings.
 
 You can edit event notes directly in Obsidian. Vault Calendar refreshes when a note is created, edited, renamed, or deleted.
 

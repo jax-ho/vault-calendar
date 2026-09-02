@@ -22,6 +22,7 @@ const modalHarness = vi.hoisted(() => ({
 	notices: [] as string[],
 	propertyControls: [] as Array<{
 		property: string;
+		relationItems: unknown[];
 		value: unknown;
 		onChange: (value: unknown) => void;
 	}>,
@@ -34,8 +35,14 @@ vi.mock('./event-property-input', () => ({
 		_definition: unknown,
 		value: unknown,
 		onChange: (value: unknown) => void,
+		relationItems: unknown[] = [],
 	) => {
-		modalHarness.propertyControls.push({ property, value, onChange });
+		modalHarness.propertyControls.push({
+			property,
+			relationItems,
+			value,
+			onChange,
+		});
 	},
 }));
 
@@ -175,16 +182,26 @@ describe('new event form', () => {
 			openAdapter: { openMarkdownFile },
 		} as unknown as CalendarViewPlugin;
 
-		const modal = new EventTitleModal(plugin, config, '2026-08-21');
+		const parentItems = [
+			{ path: 'Life/Work/Roadmap.md', title: 'Roadmap' },
+		];
+		const modal = new EventTitleModal(
+			plugin,
+			config,
+			'2026-08-21',
+			parentItems,
+		);
 		modal.onOpen();
 
 		expect(modalHarness.propertyControls.map(({ property }) => property)).toEqual([
+			'parent-item',
 			'status',
 			'type',
 			'important',
 			'estimate',
 		]);
 		expect(modalHarness.propertyControls.map(({ value }) => value)).toEqual([
+			undefined,
 			'Not started',
 			'Task',
 			false,
@@ -192,11 +209,22 @@ describe('new event form', () => {
 		]);
 		expect(modalHarness.icons).toEqual([
 			'calendar-days',
+			'corner-down-right',
 			'circle-chevron-down',
 			'circle-chevron-down',
 			'square-check-big',
 			'hash',
 		]);
+		expect(
+			modalHarness.propertyControls.find(
+				({ property }) => property === 'parent-item',
+			)?.relationItems,
+		).toEqual(parentItems);
+		expect(
+			modalHarness.elements.some(
+				({ options }) => options?.text === 'Parent item',
+			),
+		).toBe(true);
 
 		const title = findElement(
 			({ options }) => options?.attr?.['aria-label'] === 'Event title',
@@ -234,6 +262,7 @@ describe('new event form', () => {
 			'Planning',
 			'2026-08-21',
 			{
+				'parent-item': undefined,
 				status: 'Done',
 				type: 'Idea',
 				important: true,

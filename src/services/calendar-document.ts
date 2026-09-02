@@ -18,7 +18,13 @@ import {
 	uniqueMarkdownPath,
 } from '../domain/note-creation';
 import { createEventPropertyDraft } from '../domain/event-creation';
-import { EVENT_TITLE_PROPERTY } from '../domain/reserved-properties';
+import { normalizeParentItemLink } from '../domain/item-relations';
+import {
+	EVENT_PARENT_ITEM_PROPERTY,
+	EVENT_TITLE_PROPERTY,
+	RESERVED_EVENT_PROPERTIES,
+	isReservedEventProperty,
+} from '../domain/reserved-properties';
 import { isPathInCalendarSource } from '../domain/source-scope';
 import type {
 	CalendarConfig,
@@ -39,6 +45,18 @@ function markdownDocument(
 	body = '',
 ): string {
 	return `---\n${stringifyYaml(frontmatter)}---\n\n${body}`;
+}
+
+function validateDatePropertyNames(
+	startDateProperty: string,
+	endDateProperty?: string,
+): void {
+	if (isReservedEventProperty(startDateProperty)) {
+		throw new Error('Start date property cannot use a reserved event property.');
+	}
+	if (endDateProperty && isReservedEventProperty(endDateProperty)) {
+		throw new Error('End date property cannot use a reserved event property.');
+	}
 }
 
 export class CalendarDocumentService {
@@ -79,6 +97,10 @@ export class CalendarDocumentService {
 		const name = input.name.trim();
 		if (!name) throw new Error('Enter a calendar name.');
 		if (!input.startDateProperty.trim()) throw new Error('Enter a start date property.');
+		validateDatePropertyNames(
+			input.startDateProperty.trim(),
+			input.endDateProperty?.trim(),
+		);
 		const folder = normalizeVaultPath(input.documentFolder);
 		if (!folder) throw new Error('Calendars require a dedicated folder.');
 		await this.ensureFolder(folder);
@@ -116,6 +138,10 @@ export class CalendarDocumentService {
 		if (!isCalendarDocumentPath(config.documentPath)) {
 			throw new Error('Calendar documents must use <root>/<calendar>/_calendar.md.');
 		}
+		validateDatePropertyNames(
+			config.startDateProperty,
+			config.endDateProperty,
+		);
 		const file = this.app.vault.getFileByPath(config.documentPath);
 		if (!file) throw new Error(`Calendar document not found: ${config.documentPath}`);
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
@@ -130,6 +156,10 @@ export class CalendarDocumentService {
 		properties?: Record<string, unknown>,
 		body = '',
 	): Promise<TFile> {
+		validateDatePropertyNames(
+			config.startDateProperty,
+			config.endDateProperty,
+		);
 		const folder = normalizeVaultPath(config.createFolder);
 		await this.ensureFolder(folder);
 		const path = normalizePath(
@@ -144,8 +174,14 @@ export class CalendarDocumentService {
 			[EVENT_TITLE_PROPERTY]: title.trim(),
 			[config.startDateProperty]: date,
 		};
+		const parentItem = normalizeParentItemLink(
+			properties?.[EVENT_PARENT_ITEM_PROPERTY],
+		);
+		if (parentItem) {
+			frontmatter[EVENT_PARENT_ITEM_PROPERTY] = parentItem;
+		}
 		const reservedProperties = new Set([
-			EVENT_TITLE_PROPERTY,
+			...RESERVED_EVENT_PROPERTIES,
 			config.startDateProperty,
 			config.endDateProperty,
 		]);

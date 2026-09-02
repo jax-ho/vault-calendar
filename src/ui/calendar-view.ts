@@ -1,5 +1,6 @@
 import {
 	ItemView,
+	Menu,
 	Notice,
 	setIcon,
 	type ViewStateResult,
@@ -40,7 +41,12 @@ import type {
 	CalendarViewState,
 	ConfigIssue,
 } from '../types';
-import { renderCardProperties } from './calendar-card';
+import {
+	calendarRelationshipAccessibleSummary,
+	calendarRelationshipRowCount,
+	renderCardProperties,
+	renderCardRelationships,
+} from './calendar-card';
 import { CalendarIssuesModal } from './calendar-list-modal';
 import { CalendarSettingsModal } from './calendar-settings-modal';
 import { EventTitleModal } from './event-title-modal';
@@ -142,6 +148,9 @@ export class CalendarView extends ItemView {
 		this.contentEl.tabIndex = 0;
 		this.plugin.registerViewInstance(this);
 		this.registerDomEvent(this.contentEl, 'keydown', (event) => this.handleKeydown(event));
+		this.registerDomEvent(this.contentEl, 'contextmenu', (event) => {
+			this.openItemMenu(event);
+		});
 		const ownerWindow = this.contentEl.ownerDocument.defaultView;
 		if (ownerWindow) {
 			this.registerDomEvent(ownerWindow, 'focus', () => {
@@ -153,7 +162,11 @@ export class CalendarView extends ItemView {
 			this.registerDomEvent(ownerWindow, 'pointerup', (event) => {
 				void this.handlePointerUp(event);
 			});
-			this.registerDomEvent(ownerWindow, 'pointercancel', () => this.clearInteractionPreview());
+			this.registerDomEvent(ownerWindow, 'pointercancel', (event) => {
+				if (this.resizeSession?.pointerId === event.pointerId) {
+					this.clearInteractionPreview();
+				}
+			});
 		}
 		await this.loadCalendar();
 	}
@@ -288,7 +301,14 @@ export class CalendarView extends ItemView {
 	private render(): void {
 		this.contentEl.empty();
 		this.contentEl.addClass('calendar-view-root');
-		const cardMetrics = calendarCardMetrics(this.config?.visibleProperties.length ?? 0);
+		const relationshipRows = this.snapshot.items.reduce(
+			(maximum, item) => Math.max(maximum, calendarRelationshipRowCount(item)),
+			0,
+		);
+		const cardMetrics = calendarCardMetrics(
+			this.config?.visibleProperties.length ?? 0,
+			relationshipRows,
+		);
 		this.contentEl.style.setProperty('--cv-card-height', `${cardMetrics.height}px`);
 		this.contentEl.style.setProperty('--cv-card-step', `${cardMetrics.step}px`);
 		if (!this.config) {
@@ -505,7 +525,13 @@ export class CalendarView extends ItemView {
 		card.style.setProperty('--cv-track', String(segment.track));
 		card.tabIndex = 0;
 		card.setAttribute('role', 'button');
-		card.setAttribute('aria-label', `${segment.item.title}, ${segment.item.start}`);
+		const relationshipSummary = calendarRelationshipAccessibleSummary(segment.item);
+		card.setAttribute(
+			'aria-label',
+			[segment.item.title, segment.item.start, relationshipSummary]
+				.filter(Boolean)
+				.join(', '),
+		);
 		card.setAttribute('title', segment.item.title);
 		card.draggable = true;
 		if (segment.item.end) card.addClass('is-multiday');
@@ -513,6 +539,7 @@ export class CalendarView extends ItemView {
 		if (segment.continuesAfter) card.addClass('continues-after');
 
 		card.createDiv({ cls: 'cv-card-title', text: segment.item.title });
+		renderCardRelationships(card, segment.item);
 		renderCardProperties(
 			this.app,
 			card,
@@ -529,7 +556,7 @@ export class CalendarView extends ItemView {
 			if (event.button === 1) void this.openItem(segment.item, true);
 		});
 		card.addEventListener('keydown', (event) => {
-			if (event.key === 'Enter') {
+			if (event.key === 'Enter' || event.key === ' ') {
 				event.preventDefault();
 				void this.openItem(segment.item, event.metaKey || event.ctrlKey);
 			}
@@ -756,10 +783,59 @@ export class CalendarView extends ItemView {
 			return;
 		}
 		if (!newLeaf && this.config) {
-			new EventEditorModal(this.plugin, this.config, item).open();
+			new EventEditorModal(
+				this.plugin,
+				this.config,
+				item,
+				{
+					parentItems: this.index?.parentCandidatesFor(item.path) ?? [],
+					validateParentItem: (value) =>
+						this.index?.validateParentItem(item.path, value),
+				},
+			).open();
 			return;
 		}
 		await this.plugin.openAdapter.openMarkdownFile(file, true);
+	}
+
+	private openItemMenu(event: MouseEvent): void {
+		const targetNode = event.targetNode;
+		const target =
+			targetNode?.nodeType === 1
+				? (targetNode as HTMLElement)
+				: targetNode?.parentElement;
+		const card = target?.closest<HTMLElement>('.cv-event-card');
+		const path = card?.dataset.path;
+		if (!card || !path || !this.contentEl.contains(card)) return;
+		event.preventDefault();
+		event.stopPropagation();
+		const menu = new Menu();
+		menu.addItem((menuItem) => {
+			menuItem
+				.setTitle('Move to trash')
+				.setIcon('trash-2')
+				.setWarning(true)
+				.onClick(() => {
+					void this.moveItemToTrash(path);
+				});
+		});
+		menu.showAtMouseEvent(event);
+	}
+
+	private async moveItemToTrash(path: string): Promise<void> {
+		const file = this.app.vault.getFileByPath(path);
+		if (!file) {
+			new Notice(`${path} was moved or deleted. The calendar will refresh.`);
+			this.plugin.indexes.handleFileDeleted(path);
+			return;
+		}
+		try {
+			await this.app.fileManager.trashFile(file);
+		} catch (error) {
+			new Notice(
+				error instanceof Error ? error.message : 'Unable to move event to trash.',
+			);
+		}
 	}
 
 	private openIssues(): void {
@@ -782,7 +858,12 @@ export class CalendarView extends ItemView {
 
 	private createEvent(date: PlainDate): void {
 		if (!this.config) return;
-		new EventTitleModal(this.plugin, this.config, date).open();
+		new EventTitleModal(
+			this.plugin,
+			this.config,
+			date,
+			this.index?.parentCandidatesFor() ?? [],
+		).open();
 	}
 
 	private navigate(direction: -1 | 1): void {

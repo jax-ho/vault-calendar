@@ -3,7 +3,11 @@ import type {
 	CalendarPropertyType,
 } from '../types';
 
-export type EventFieldType = CalendarPropertyType | 'date';
+export type EventFieldType =
+	| CalendarPropertyType
+	| 'date'
+	| 'relation'
+	| 'relations';
 
 const PROPERTY_TYPE_ICONS: Record<EventFieldType, string> = {
 	date: 'calendar-days',
@@ -11,6 +15,8 @@ const PROPERTY_TYPE_ICONS: Record<EventFieldType, string> = {
 	checkbox: 'square-check-big',
 	text: 'type',
 	number: 'hash',
+	relation: 'corner-down-right',
+	relations: 'list-tree',
 };
 
 const PROPERTY_TYPE_LABELS: Record<CalendarPropertyType, string> = {

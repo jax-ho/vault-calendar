@@ -1,7 +1,12 @@
 import { compareDates, isPlainDate, parseCalendarDate } from './dates';
 import { replaceCalendarDatePart } from './frontmatter-mutation';
+import { normalizeParentItemLink } from './item-relations';
 import { resolvedPropertyValue } from './property-values';
-import { EVENT_TITLE_PROPERTY } from './reserved-properties';
+import {
+	EVENT_PARENT_ITEM_PROPERTY,
+	EVENT_TITLE_PROPERTY,
+	RESERVED_EVENT_PROPERTIES,
+} from './reserved-properties';
 import type { CalendarPropertyDefinition } from '../types';
 
 export interface EventFieldMapping {
@@ -9,6 +14,7 @@ export interface EventFieldMapping {
 	endDateProperty?: string;
 	visibleProperties: string[];
 	propertyDefinitions: Record<string, CalendarPropertyDefinition>;
+	validateParentItem?: (value: string | undefined) => void;
 }
 
 export interface EventEditDraft {
@@ -30,16 +36,20 @@ function cloneValue(value: unknown): unknown {
 
 function editablePropertyNames(mapping: EventFieldMapping): string[] {
 	const reserved = new Set([
-		EVENT_TITLE_PROPERTY,
+		...RESERVED_EVENT_PROPERTIES,
 		mapping.startDateProperty,
 		mapping.endDateProperty,
 	]);
-	return [
+	const configurableProperties = [
 		...new Set([
 			...Object.keys(mapping.propertyDefinitions),
 			...mapping.visibleProperties,
 		]),
 	].filter((property) => !reserved.has(property));
+	return [
+		EVENT_PARENT_ITEM_PROPERTY,
+		...configurableProperties,
+	];
 }
 
 export function createEventEditDraft(
@@ -60,6 +70,10 @@ export function createEventEditDraft(
 	const properties: Record<string, unknown> = {};
 	for (const property of editablePropertyNames(mapping)) {
 		const storedValue = frontmatter[property];
+		if (property === EVENT_PARENT_ITEM_PROPERTY) {
+			properties[property] = typeof storedValue === 'string' ? storedValue : undefined;
+			continue;
+		}
 		const definition = mapping.propertyDefinitions[property];
 		properties[property] = cloneValue(
 			definition
@@ -84,6 +98,17 @@ export function validateEventEditDraft(
 	mapping: EventFieldMapping,
 ): void {
 	if (!isPlainDate(draft.start)) throw new Error('Choose a valid start date.');
+	if (
+		Object.prototype.hasOwnProperty.call(
+			draft.properties,
+			EVENT_PARENT_ITEM_PROPERTY,
+		)
+	) {
+		const parentItem = normalizeParentItemLink(
+			draft.properties[EVENT_PARENT_ITEM_PROPERTY],
+		);
+		mapping.validateParentItem?.(parentItem);
+	}
 	if (mapping.endDateProperty && draft.end) {
 		if (!isPlainDate(draft.end)) throw new Error('Choose a valid end date.');
 		if (compareDates(draft.end, draft.start) < 0) {
@@ -120,6 +145,13 @@ export function applyEventEditDraft(
 
 	for (const property of editablePropertyNames(mapping)) {
 		const value = draft.properties[property];
+		if (property === EVENT_PARENT_ITEM_PROPERTY) {
+			if (!Object.prototype.hasOwnProperty.call(draft.properties, property)) continue;
+			const parentItem = normalizeParentItemLink(value);
+			if (parentItem) frontmatter[property] = parentItem;
+			else delete frontmatter[property];
+			continue;
+		}
 		if (
 			value === undefined ||
 			value === null ||
