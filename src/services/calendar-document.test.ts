@@ -847,6 +847,23 @@ describe('calendar document file layout', () => {
 		);
 	});
 
+	it('creates an empty-titled event with only its unique suffix as the filename', async () => {
+		const { app, create } = createTestApp();
+		const service = calendarDocuments(app, () => '7f3A');
+
+		const file = await service.createEvent(
+			calendarConfig(),
+			'',
+			'2026-08-21',
+		);
+
+		expect(file.path).toBe('Life/Work/--7f3A.md');
+		expect(create).toHaveBeenCalledWith(
+			'Life/Work/--7f3A.md',
+			expect.stringContaining('"title":"","date":"2026-08-21"'),
+		);
+	});
+
 	it('writes the property values selected in the creation form', async () => {
 		const { app, create } = createTestApp();
 		const service = calendarDocuments(app, () => '7f3A');

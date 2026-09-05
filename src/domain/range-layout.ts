@@ -6,6 +6,7 @@ import {
 	daysBetween,
 	type PlainDate,
 } from './dates';
+import { eventDisplayTitle } from './event-title';
 import { sortCalendarItems } from './projection';
 
 export interface CalendarSegment {
@@ -85,10 +86,14 @@ export function segmentCalendarItems(
 		if (left.weekIndex !== right.weekIndex) return left.weekIndex - right.weekIndex;
 		if (left.startColumn !== right.startColumn) return left.startColumn - right.startColumn;
 		if (left.span !== right.span) return right.span - left.span;
-		const titleOrder = left.item.title.localeCompare(right.item.title, undefined, {
-			sensitivity: 'base',
-			numeric: true,
-		});
+		const titleOrder = eventDisplayTitle(left.item.title).localeCompare(
+			eventDisplayTitle(right.item.title),
+			undefined,
+			{
+				sensitivity: 'base',
+				numeric: true,
+			},
+		);
 		if (titleOrder !== 0) return titleOrder;
 		return left.item.path.localeCompare(right.item.path);
 	});

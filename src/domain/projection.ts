@@ -9,6 +9,7 @@ import {
 	parseCalendarDate,
 } from './dates';
 import { calendarCardColor } from './calendar-colors';
+import { eventDisplayTitle } from './event-title';
 import { resolvedPropertyValue } from './property-values';
 import { EVENT_TITLE_PROPERTY } from './reserved-properties';
 
@@ -32,7 +33,7 @@ function issue(
 }
 
 export function calendarItemTitle(value: unknown, fallback: string): string {
-	if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+	if (typeof value === 'string') return value.trim();
 	if (typeof value === 'number') return String(value);
 	return fallback;
 }
@@ -134,10 +135,14 @@ export function compareCalendarItems(left: CalendarItem, right: CalendarItem): n
 	if (left.startTimeSort !== right.startTimeSort) {
 		return left.startTimeSort - right.startTimeSort;
 	}
-	const titleOrder = left.title.localeCompare(right.title, undefined, {
-		sensitivity: 'base',
-		numeric: true,
-	});
+	const titleOrder = eventDisplayTitle(left.title).localeCompare(
+		eventDisplayTitle(right.title),
+		undefined,
+		{
+			sensitivity: 'base',
+			numeric: true,
+		},
+	);
 	if (titleOrder !== 0) return titleOrder;
 	return left.path.localeCompare(right.path, undefined, {
 		sensitivity: 'base',

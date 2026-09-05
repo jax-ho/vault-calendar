@@ -378,7 +378,7 @@ isWritableBoardGroupProperty(
 - 缺失值没有 default、显式 `None` 或未知旧 option 值进入 `None`。
 - 未知旧值只在投影中归入 `None`，不借渲染清洗源笔记。
 - 卡片顺序为开始日期、开始时间、title、path；v1 不持久化手工顺序。
-- 卡片显示 title、关系、共享 visible properties、日期或日期范围。
+- 卡片显示 title、关系、共享 visible properties、日期或日期范围；title 为空时只在 UI 中显示 **New page**，底层 title 仍为空。
 - 日期始终显示且不受 `visibleProperties` 控制：单日为 `YYYY-MM-DD`，范围为 `start – end`。
 - 卡片颜色继续由共享 `cardColorProperty` 决定，与当前 Board 的 `groupBy` 相互独立。
 - 不继承 Calendar 的 absolute positioning、固定高度和 resize handle。

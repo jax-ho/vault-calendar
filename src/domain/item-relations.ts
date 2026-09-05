@@ -1,3 +1,5 @@
+import { eventDisplayTitle } from './event-title';
+
 export interface ItemRelationSeed {
 	path: string;
 	title: string;
@@ -94,10 +96,14 @@ function compareIdentity(
 	left: Pick<ItemRelationSeed, 'path' | 'title'>,
 	right: Pick<ItemRelationSeed, 'path' | 'title'>,
 ): number {
-	const titleOrder = left.title.localeCompare(right.title, undefined, {
-		numeric: true,
-		sensitivity: 'base',
-	});
+	const titleOrder = eventDisplayTitle(left.title).localeCompare(
+		eventDisplayTitle(right.title),
+		undefined,
+		{
+			numeric: true,
+			sensitivity: 'base',
+		},
+	);
 	if (titleOrder !== 0) return titleOrder;
 	return left.path.localeCompare(right.path, undefined, {
 		numeric: true,

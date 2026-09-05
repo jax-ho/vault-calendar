@@ -85,7 +85,7 @@ describe('calendar item projection', () => {
 		expect(frontmatter.status).toBe('Removed');
 	});
 
-	it('uses the file path as identity and falls back to the filename for title', () => {
+	it('uses the file path as identity and falls back to the filename only when title is absent', () => {
 		const result = projectCalendarFile(
 			{ path: 'Tasks/Alpha.md', basename: 'Alpha', mtime: 12, frontmatter: { date: '2026-08-17' } },
 			config,
@@ -96,6 +96,17 @@ describe('calendar item projection', () => {
 			start: '2026-08-17',
 			mtime: 12,
 		});
+
+		const blank = projectCalendarFile(
+			{
+				path: 'Tasks/--7f3A.md',
+				basename: '--7f3A',
+				mtime: 13,
+				frontmatter: { title: '   ', date: '2026-08-17' },
+			},
+			config,
+		);
+		expect(blank.item?.title).toBe('');
 	});
 
 	it('isolates missing, invalid, and reversed dates', () => {
@@ -145,6 +156,20 @@ describe('calendar item projection', () => {
 			{ path: 'A.md', title: 'Same', start: '2026-08-17', startTimeSort: 0, allDay: true, properties: {}, mtime: 1, subItems: [] },
 		];
 		expect(sortCalendarItems(items).map((item) => item.path)).toEqual(['A.md', 'Z.md', 'B.md']);
+	});
+
+	it('sorts an empty title by its visible New page label', () => {
+		const items = [
+			{ path: 'Zebra.md', title: 'Zebra', start: '2026-08-17', startTimeSort: 0, allDay: true, properties: {}, mtime: 1, subItems: [] },
+			{ path: 'Untitled.md', title: '', start: '2026-08-17', startTimeSort: 0, allDay: true, properties: {}, mtime: 1, subItems: [] },
+			{ path: 'Alpha.md', title: 'Alpha', start: '2026-08-17', startTimeSort: 0, allDay: true, properties: {}, mtime: 1, subItems: [] },
+		];
+
+		expect(sortCalendarItems(items).map((item) => item.path)).toEqual([
+			'Alpha.md',
+			'Untitled.md',
+			'Zebra.md',
+		]);
 	});
 
 	it('sorts ISO date-times by their authored start time before title and path', () => {

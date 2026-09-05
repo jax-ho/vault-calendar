@@ -1,6 +1,7 @@
 import { Menu, Notice } from 'obsidian';
 import { projectBoardColumns } from '../domain/board-projection';
 import { todayPlainDate } from '../domain/dates';
+import { eventDisplayTitle } from '../domain/event-title';
 import { writableBoardGroupProperties } from '../domain/saved-view-form';
 import { isWritableBoardGroupProperty, validSavedViews } from '../domain/saved-views';
 import {
@@ -300,11 +301,12 @@ export class BoardSurface
 		card.dataset.color = item.color ?? 'default';
 		card.tabIndex = 0;
 		card.setAttribute('role', 'button');
-		card.setAttribute('title', item.title);
+		const displayTitle = eventDisplayTitle(item.title);
+		card.setAttribute('title', displayTitle);
 		const relationshipSummary = calendarRelationshipAccessibleSummary(item);
 		card.setAttribute(
 			'aria-label',
-			[item.title, boardDateLabel(item), relationshipSummary]
+			[displayTitle, boardDateLabel(item), relationshipSummary]
 				.filter(Boolean)
 				.join(', '),
 		);
@@ -315,7 +317,7 @@ export class BoardSurface
 			card.setAttribute('aria-busy', 'true');
 		}
 
-		card.createDiv({ cls: 'cv-card-title', text: item.title });
+		card.createDiv({ cls: 'cv-card-title', text: displayTitle });
 		card.createDiv({ cls: 'cv-board-card-date', text: boardDateLabel(item) });
 		renderCardRelationships(card, item);
 		renderCardProperties(

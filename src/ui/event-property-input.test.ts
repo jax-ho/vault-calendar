@@ -66,6 +66,7 @@ describe('fixed relation property input', () => {
 			[
 				{ path: 'Life/Work/generated--78gG.md', title: '任务四' },
 				{ path: 'Life/Work/hello--d850.md', title: 'hello' },
+				{ path: 'Life/Work/--7f3A.md', title: '' },
 			],
 		);
 
@@ -82,12 +83,13 @@ describe('fixed relation property input', () => {
 
 		const parentOptions = select?.children.slice(1) ?? [];
 		expect(parentOptions.map((option) => option.text)).toEqual(
-			expect.arrayContaining(['任务四', 'hello']),
+			expect.arrayContaining(['任务四', 'hello', 'New page']),
 		);
 		expect(parentOptions.map((option) => option.value)).toEqual(
 			expect.arrayContaining([
 				'[[Life/Work/generated--78gG]]',
 				'[[Life/Work/hello--d850]]',
+				'[[Life/Work/--7f3A]]',
 			]),
 		);
 		for (const option of parentOptions) {

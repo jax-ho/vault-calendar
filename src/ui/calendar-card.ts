@@ -1,5 +1,6 @@
 import { setIcon, type App } from 'obsidian';
 import { selectOptionColor } from '../domain/calendar-colors';
+import { eventDisplayTitle } from '../domain/event-title';
 import type {
 	CalendarItem,
 	CalendarPropertyDefinition,
@@ -10,7 +11,7 @@ const INTERNAL_LINK_PATTERN = /^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/u;
 function parentItemTitle(item: CalendarItem): string | undefined {
 	const parent = item.parentItem;
 	if (!parent) return undefined;
-	return parent.title.trim() || parent.path;
+	return eventDisplayTitle(parent.title);
 }
 
 function subItemCountLabel(count: number): string {

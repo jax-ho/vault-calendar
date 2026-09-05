@@ -14,6 +14,7 @@ import {
 	type PlainDate,
 } from '../domain/dates';
 import { replaceCalendarDatePart } from '../domain/frontmatter-mutation';
+import { eventDisplayTitle } from '../domain/event-title';
 import {
 	moveDateRange,
 	resizeDateRange,
@@ -382,6 +383,7 @@ export class CalendarSurface extends Component implements ViewSurface<
 
 	private renderSegment(layer: HTMLElement, segment: CalendarSegment): void {
 		if (!this.config) return;
+		const displayTitle = eventDisplayTitle(segment.item.title);
 		const card = layer.createDiv({ cls: 'cv-event-card cv-color-token' });
 		card.dataset.path = segment.item.path;
 		card.dataset.color = segment.item.color ?? 'default';
@@ -393,17 +395,17 @@ export class CalendarSurface extends Component implements ViewSurface<
 		const relationshipSummary = calendarRelationshipAccessibleSummary(segment.item);
 		card.setAttribute(
 			'aria-label',
-			[segment.item.title, segment.item.start, relationshipSummary]
+			[displayTitle, segment.item.start, relationshipSummary]
 				.filter(Boolean)
 				.join(', '),
 		);
-		card.setAttribute('title', segment.item.title);
+		card.setAttribute('title', displayTitle);
 		card.draggable = true;
 		if (segment.item.end) card.addClass('is-multiday');
 		if (segment.continuesBefore) card.addClass('continues-before');
 		if (segment.continuesAfter) card.addClass('continues-after');
 
-		card.createDiv({ cls: 'cv-card-title', text: segment.item.title });
+		card.createDiv({ cls: 'cv-card-title', text: displayTitle });
 		renderCardRelationships(card, segment.item);
 		renderCardProperties(
 			this.dependencies.plugin.app,
@@ -445,7 +447,10 @@ export class CalendarSurface extends Component implements ViewSurface<
 	private renderResizeHandle(card: HTMLElement, item: CalendarItem, edge: ResizeEdge): void {
 		const handle = card.createDiv({ cls: `cv-resize-handle is-${edge}` });
 		handle.setAttribute('role', 'separator');
-		handle.setAttribute('aria-label', `Resize ${edge} date for ${item.title}`);
+		handle.setAttribute(
+			'aria-label',
+			`Resize ${edge} date for ${eventDisplayTitle(item.title)}`,
+		);
 		handle.tabIndex = 0;
 		handle.addEventListener('pointerdown', (event) => {
 			event.preventDefault();

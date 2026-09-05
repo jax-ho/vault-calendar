@@ -544,6 +544,26 @@ describe('Board surface', () => {
 		);
 	});
 
+	it('renders an empty event title as New page', () => {
+		const harness = createHarness();
+		const surface = createBoardSurface(harness.dependencies);
+		const untitled = item('Tasks/--7f3A.md', 'Todo', { title: '' });
+
+		surface.mount(
+			harness.container as unknown as HTMLElement,
+			input([untitled]),
+		);
+		const root = elementWithClass(harness.container, 'cv-board-surface');
+		const card = cardFor(root, untitled.path);
+
+		expect(elementWithClass(card, 'cv-card-title').text).toBe('New page');
+		expect(card.attributes.get('title')).toBe('New page');
+		expect(card.attributes.get('aria-label')).toBe(
+			'New page, 2026-09-04, Parent item: Parent',
+		);
+		expect(untitled.title).toBe('');
+	});
+
 	it('routes pointer, keyboard, middle-click, context-menu, and primary actions', async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date(2026, 8, 4, 23, 59));

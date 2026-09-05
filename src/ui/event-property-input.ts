@@ -1,5 +1,6 @@
 import { selectOptionColor } from '../domain/calendar-colors';
 import { eventPropertyControl } from '../domain/event-property-controls';
+import { eventDisplayTitle } from '../domain/event-title';
 import { resolvedSelectValue } from '../domain/property-values';
 import { EVENT_PARENT_ITEM_PROPERTY } from '../domain/reserved-properties';
 import type {
@@ -34,10 +35,14 @@ function renderParentItemSelect(
 	const currentValue = typeof value === 'string' ? value.trim() : '';
 	const sortedItems = [...items].sort(
 		(left, right) =>
-			left.title.localeCompare(right.title, undefined, {
-				sensitivity: 'base',
-				numeric: true,
-			}) || left.path.localeCompare(right.path),
+			eventDisplayTitle(left.title).localeCompare(
+				eventDisplayTitle(right.title),
+				undefined,
+				{
+					sensitivity: 'base',
+					numeric: true,
+				},
+			) || left.path.localeCompare(right.path),
 	);
 	const itemValues = new Set(sortedItems.map((item) => itemWikiLink(item.path)));
 	if (currentValue && !itemValues.has(currentValue)) {
@@ -49,7 +54,7 @@ function renderParentItemSelect(
 	for (const item of sortedItems) {
 		select.createEl('option', {
 			value: itemWikiLink(item.path),
-			text: item.title,
+			text: eventDisplayTitle(item.title),
 		});
 	}
 	select.value = currentValue;

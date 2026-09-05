@@ -124,8 +124,7 @@ export function applyEventEditDraft(
 ): void {
 	validateEventEditDraft(draft, mapping);
 	const title = draft.title.trim();
-	if (title) frontmatter[EVENT_TITLE_PROPERTY] = title;
-	else delete frontmatter[EVENT_TITLE_PROPERTY];
+	frontmatter[EVENT_TITLE_PROPERTY] = title;
 
 	const originalStart = frontmatter[mapping.startDateProperty];
 	frontmatter[mapping.startDateProperty] = replaceCalendarDatePart(

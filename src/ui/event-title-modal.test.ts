@@ -345,14 +345,20 @@ describe('new event form', () => {
 		} as unknown as CalendarViewPlugin;
 		const modal = new EventTitleModal(plugin, calendarConfig(), '2026-08-21');
 		modal.onOpen();
+		expect(
+			modalHarness.elements.find(
+				({ options }) => options?.attr?.['aria-label'] === 'Event title',
+			)?.options?.attr?.placeholder,
+		).toBe('New page');
 
 		modal.close();
 		modalHarness.propertyControls.find(({ property }) => property === 'status')?.onChange('Done');
 
+		expect(createEvent.mock.calls[0]?.[1]).toBe('');
 		const capturedProperties = createEvent.mock.calls[0]?.[3] as Record<string, unknown>;
 		expect(capturedProperties.status).toBe('Not started');
 
-		finishCreation?.({ path: 'Life/Work/untitled--7f3a9c00.md' });
+		finishCreation?.({ path: 'Life/Work/--7f3a9c00.md' });
 		await vi.waitFor(() => expect(modalHarness.closeCalls).toBe(1));
 	});
 });

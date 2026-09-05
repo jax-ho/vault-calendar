@@ -11,20 +11,24 @@ export class FileAlreadyExistsError extends Error {
 	}
 }
 
-export function sanitizeNoteName(name: string): string {
+function sanitizedNoteName(name: string): string {
 	const withoutControls = [...name]
 		.filter((character) => {
 			const code = character.codePointAt(0) ?? 0;
 			return code >= 32 && code !== 127;
 		})
 		.join('');
-	const sanitized = withoutControls
+	return withoutControls
 		.replace(/[\\/:*?"<>|#^]/gu, ' ')
 		.replaceAll('[', ' ')
 		.replaceAll(']', ' ')
 		.replace(/\s+/gu, ' ')
 		.trim()
 		.replace(/[. ]+$/u, '');
+}
+
+export function sanitizeNoteName(name: string): string {
+	const sanitized = sanitizedNoteName(name);
 	if (!sanitized) throw new Error('Enter a valid note name.');
 	return sanitized;
 }
@@ -61,7 +65,7 @@ export function uniqueEventMarkdownPath(
 	exists: (path: string) => boolean,
 	createId: () => string = createShortEventId,
 ): string {
-	const safeTitle = sanitizeNoteName(title);
+	const safeTitle = sanitizedNoteName(title);
 	const normalizedFolder = normalizeVaultPath(folder);
 	for (let attempt = 0; attempt < 16; attempt += 1) {
 		const id = createId().replace(/[^A-Za-z0-9]/gu, '').slice(0, EVENT_ID_LENGTH);

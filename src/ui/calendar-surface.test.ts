@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 interface ElementOptions {
+	attr?: Record<string, string>;
 	cls?: string;
 	text?: string;
 	value?: string;
@@ -35,6 +36,7 @@ const surfaceHarness = vi.hoisted(() => {
 		};
 		children: MockElement[] = [];
 		classes = new Set<string>();
+		readonly attributes = new Map<string, string>();
 		dataset: Record<string, string> = {};
 		draggable = false;
 		readonly nodeType = 1;
@@ -42,6 +44,7 @@ const surfaceHarness = vi.hoisted(() => {
 		scrollLeft = 0;
 		scrollTop = 0;
 		tabIndex = 0;
+		readonly text: string;
 		value = '';
 		readonly style = { setProperty: vi.fn() };
 
@@ -49,8 +52,12 @@ const surfaceHarness = vi.hoisted(() => {
 			readonly ownerDocument: Document,
 			options?: ElementOptions,
 		) {
+			this.text = options?.text ?? '';
 			for (const className of options?.cls?.split(/\s+/u) ?? []) {
 				if (className) this.classes.add(className);
+			}
+			for (const [name, value] of Object.entries(options?.attr ?? {})) {
+				this.attributes.set(name, value);
 			}
 			if (options?.value) this.value = options.value;
 		}
@@ -115,7 +122,9 @@ const surfaceHarness = vi.hoisted(() => {
 			this.classes.delete(className);
 		}
 
-		setAttribute(_name: string, _value: string): void {}
+		setAttribute(name: string, value: string): void {
+			this.attributes.set(name, value);
+		}
 
 		toggleClass(className: string, active: boolean): void {
 			if (active) this.classes.add(className);
@@ -376,6 +385,19 @@ afterEach(() => {
 });
 
 describe('calendar surface lifecycle', () => {
+	it('renders an empty event title as New page', () => {
+		const untitled = { ...item(), title: '' };
+		const { container } = setup({ snapshot: snapshot([untitled]) });
+		const card = cards(container)[0];
+
+		expect(card?.querySelectorAll<InstanceType<typeof surfaceHarness.MockElement>>(
+			'.cv-card-title',
+		)[0]?.text).toBe('New page');
+		expect(card?.attributes.get('title')).toBe('New page');
+		expect(card?.attributes.get('aria-label')).toBe('New page, 2026-09-01');
+		expect(untitled.title).toBe('');
+	});
+
 	it('restores per-view state, ignores state on update, and returns current scroll state', () => {
 		const setupResult = setup({ snapshot: snapshot([]) });
 		setupResult.surface.deactivate();

@@ -1,6 +1,7 @@
 import { Modal, Notice } from 'obsidian';
 import type { PlainDate } from '../domain/dates';
 import { createEventPropertyDraft } from '../domain/event-creation';
+import { EMPTY_EVENT_TITLE_DISPLAY } from '../domain/event-title';
 import { resolvedPropertyType } from '../domain/property-type-icons';
 import { EVENT_PARENT_ITEM_PROPERTY } from '../domain/reserved-properties';
 import type CalendarViewPlugin from '../main';
@@ -33,7 +34,10 @@ export class EventTitleModal extends Modal {
 		const title = this.contentEl.createEl('input', {
 			cls: 'cv-event-editor-title',
 			type: 'text',
-			attr: { 'aria-label': 'Event title', placeholder: 'Untitled event' },
+			attr: {
+				'aria-label': 'Event title',
+				placeholder: EMPTY_EVENT_TITLE_DISPLAY,
+			},
 		});
 		title.addEventListener('input', () => {
 			this.title = title.value;

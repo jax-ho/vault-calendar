@@ -106,13 +106,13 @@ In a Calendar view, move your pointer over a day and select the **+** button in 
 
 In the popup, you can enter:
 
-- A title.
+- An optional title. Blank titles display as **New page**.
 - Values for the calendar's configured properties.
 - Markdown notes.
 
 There is no **Create** button. When you are ready, close the popup with its close button, by selecting outside it, or by pressing Escape. Closing creates the event while keeping the calendar open. Pressing Enter in the title field does not submit or close the popup.
 
-Each event is saved as a separate Markdown note in the calendar folder. Vault Calendar adds a short unique suffix to the filename, so two events can use the same title without overwriting each other. The title displayed on the card comes from the note's `title` property, not from that suffix.
+Each event is saved as a separate Markdown note in the calendar folder. Vault Calendar adds a short unique suffix to the filename, so two events can use the same title without overwriting each other. An empty title stays empty in the note data, uses `--<ID>.md` as its technical filename, and displays as **New page** only in the UI. The ID does not appear on the card.
 
 ## Edit an event
 

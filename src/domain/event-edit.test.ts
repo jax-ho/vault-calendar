@@ -67,6 +67,17 @@ describe('event edit draft', () => {
 		});
 	});
 
+	it('reopens an explicit empty title without replacing it from the filename', () => {
+		const draft = createEventEditDraft(
+			{ title: '', date: '2026-08-20' },
+			'',
+			mapping,
+			{ title: '--7f3A', start: '2026-08-20' },
+		);
+
+		expect(draft.title).toBe('');
+	});
+
 	it('resolves a deleted select option to None and persists None on the next save', () => {
 		const frontmatter: Record<string, unknown> = {
 			title: 'Launch',
@@ -218,6 +229,27 @@ describe('event edit draft', () => {
 			important: false,
 			keep: { nested: true },
 		});
+	});
+
+	it('persists a cleared title as an explicit empty title', () => {
+		const frontmatter: Record<string, unknown> = {
+			title: 'Launch',
+			date: '2026-08-20',
+		};
+
+		applyEventEditDraft(
+			frontmatter,
+			{
+				title: '   ',
+				start: '2026-08-20',
+				end: '',
+				properties: {},
+				body: '',
+			},
+			mapping,
+		);
+
+		expect(frontmatter.title).toBe('');
 	});
 
 	it('persists None as a real select value', () => {

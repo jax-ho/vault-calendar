@@ -4,6 +4,10 @@ import {
 	type EventEditDraft,
 	type EventFieldMapping,
 } from '../domain/event-edit';
+import {
+	EMPTY_EVENT_TITLE_DISPLAY,
+	eventDisplayTitle,
+} from '../domain/event-title';
 import { resolvedPropertyType } from '../domain/property-type-icons';
 import { EVENT_PARENT_ITEM_PROPERTY } from '../domain/reserved-properties';
 import type CalendarViewPlugin from '../main';
@@ -107,7 +111,10 @@ export class EventEditorModal extends Modal {
 		const title = this.contentEl.createEl('input', {
 			cls: 'cv-event-editor-title',
 			type: 'text',
-			attr: { 'aria-label': 'Event title', placeholder: 'Untitled' },
+			attr: {
+				'aria-label': 'Event title',
+				placeholder: EMPTY_EVENT_TITLE_DISPLAY,
+			},
 		});
 		title.value = this.draft.title;
 		title.addEventListener('input', () => {
@@ -226,7 +233,7 @@ export class EventEditorModal extends Modal {
 		for (const item of this.item.subItems) {
 			const chip = value.createSpan({ cls: 'cv-event-relation-chip' });
 			chip.setAttribute('title', item.path);
-			chip.createSpan({ text: item.title });
+			chip.createSpan({ text: eventDisplayTitle(item.title) });
 		}
 	}
 

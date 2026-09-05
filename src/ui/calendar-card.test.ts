@@ -92,6 +92,11 @@ describe('calendar card relationships', () => {
 		expect(calendarRelationshipAccessibleSummary(related)).toBe(
 			'Parent item: Parent, 2 sub-items',
 		);
+		expect(
+			calendarRelationshipAccessibleSummary(
+				item({ path: 'Tasks/--7f3A.md', title: '' }),
+			),
+		).toBe('Parent item: New page');
 	});
 
 	it('renders passive parent and derived sub-item rows', () => {
@@ -116,6 +121,19 @@ describe('calendar card relationships', () => {
 		expect(obsidianMocks.setIcon).toHaveBeenNthCalledWith(1, parent?.children[0], 'corner-down-right');
 		expect(obsidianMocks.setIcon).toHaveBeenNthCalledWith(2, subItems?.children[0], 'list-tree');
 		expect(parent?.children[0]?.attributes.get('aria-hidden')).toBe('true');
+	});
+
+	it('renders an empty parent title as New page', () => {
+		const card = new MockElement();
+		renderCardRelationships(
+			card as unknown as HTMLElement,
+			item({ path: 'Tasks/--7f3A.md', title: '' }),
+		);
+
+		const relationships = childWithClass(card, 'cv-card-relationships');
+		expect(relationships?.children[0]?.children[1]?.text).toBe(
+			'Parent: New page',
+		);
 	});
 
 	it('does not add empty relationship markup', () => {
