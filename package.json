@@ -1,6 +1,6 @@
 {
 	"name": "vault-calendar",
-	"version": "0.1.8",
+	"version": "0.1.9",
 	"private": true,
 	"description": "Property-driven calendar and board views for Markdown notes in Obsidian.",
 	"main": "main.js",
