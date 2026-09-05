@@ -43,8 +43,17 @@ calendar-properties:
     type: checkbox
     default: false
 calendar-card-color-property: status
-calendar-week-starts-on: monday
-calendar-layout: month
+calendar-views-version: 1
+calendar-views:
+  - id: calendar
+    name: Calendar view
+    type: calendar
+    layout: month
+    week-starts-on: monday
+  - id: status-board
+    name: Status board
+    type: board
+    group-by: status
 calendar-open-behavior: same-leaf
 ---
 

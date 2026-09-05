@@ -2,9 +2,11 @@ import type {
 	CalendarConfig,
 	CalendarPropertyDefinition,
 	CalendarPropertyType,
+	SavedViewCatalogEntry,
 } from '../types';
 import { copyCalendarPropertyDefinition } from './calendar-copy';
 import { reservedEventProperty } from './reserved-properties';
+import { isWritableBoardGroupProperty } from './saved-views';
 
 function orderedVisibleProperties(
 	propertyDefinitions: Record<string, CalendarPropertyDefinition>,
@@ -12,6 +14,63 @@ function orderedVisibleProperties(
 ): string[] {
 	const visible = new Set(visibleProperties);
 	return Object.keys(propertyDefinitions).filter((property) => visible.has(property));
+}
+
+function updateBoardGroupReferences(
+	config: CalendarConfig,
+	currentName: string,
+	nextName: string | undefined,
+): CalendarConfig {
+	if (!config.viewCatalog) return config;
+	const entries: SavedViewCatalogEntry[] = config.viewCatalog.entries.map((entry) => {
+		if (
+			entry.kind !== 'valid' ||
+			entry.definition.type !== 'board' ||
+			entry.definition.groupBy !== currentName
+		) {
+			return entry;
+		}
+		return {
+			kind: 'valid',
+			definition: {
+				...entry.definition,
+				groupBy: nextName,
+			},
+		};
+	});
+	return {
+		...config,
+		viewCatalog: { ...config.viewCatalog, entries },
+	};
+}
+
+export function clearInvalidBoardGroupReferences(
+	config: CalendarConfig,
+	properties: Iterable<string>,
+): CalendarConfig {
+	if (!config.viewCatalog) return config;
+	const affected = new Set(properties);
+	if (affected.size === 0) return config;
+	let changed = false;
+	const entries: SavedViewCatalogEntry[] = config.viewCatalog.entries.map((entry) => {
+		if (
+			entry.kind !== 'valid' ||
+			entry.definition.type !== 'board' ||
+			!entry.definition.groupBy ||
+			!affected.has(entry.definition.groupBy) ||
+			isWritableBoardGroupProperty(config, entry.definition.groupBy)
+		) {
+			return entry;
+		}
+		changed = true;
+		return {
+			kind: 'valid',
+			definition: { ...entry.definition, groupBy: undefined },
+		};
+	});
+	return changed
+		? { ...config, viewCatalog: { ...config.viewCatalog, entries } }
+		: config;
 }
 
 export function createPropertyDefinition(
@@ -27,6 +86,35 @@ export function createPropertyDefinition(
 	}
 	if (type === 'checkbox') return { type, default: false };
 	return { type };
+}
+
+export function sameCalendarPropertyDefinition(
+	left: CalendarPropertyDefinition | undefined,
+	right: CalendarPropertyDefinition | undefined,
+): boolean {
+	if (!left || !right || left.type !== right.type || left.default !== right.default) {
+		return left === right;
+	}
+	if (
+		(left.options === undefined) !== (right.options === undefined) ||
+		left.options?.length !== right.options?.length ||
+		left.options?.some((option, index) => option !== right.options?.[index])
+	) {
+		return false;
+	}
+	const leftColors = Object.entries(left.colors ?? {}).sort(([leftKey], [rightKey]) =>
+		leftKey.localeCompare(rightKey),
+	);
+	const rightColors = Object.entries(right.colors ?? {}).sort(([leftKey], [rightKey]) =>
+		leftKey.localeCompare(rightKey),
+	);
+	return (
+		leftColors.length === rightColors.length &&
+		leftColors.every(
+			([key, color], index) =>
+				rightColors[index]?.[0] === key && rightColors[index]?.[1] === color,
+		)
+	);
 }
 
 export function validatePropertyName(
@@ -100,7 +188,7 @@ export function renameCalendarProperty(
 			copyCalendarPropertyDefinition(value),
 		]),
 	);
-	return {
+	const next = {
 		...config,
 		propertyDefinitions,
 		visibleProperties: config.visibleProperties.map((name) =>
@@ -111,6 +199,7 @@ export function renameCalendarProperty(
 				? property
 				: config.cardColorProperty,
 	};
+	return updateBoardGroupReferences(next, currentName, property);
 }
 
 export function updateCalendarProperty(
@@ -119,7 +208,8 @@ export function updateCalendarProperty(
 	definition: CalendarPropertyDefinition,
 ): CalendarConfig {
 	if (!config.propertyDefinitions[name]) throw new Error(`Property not found: ${name}`);
-	return {
+	const wasWritableBoardGroup = isWritableBoardGroupProperty(config, name);
+	const next = {
 		...config,
 		propertyDefinitions: Object.fromEntries(
 			Object.entries(config.propertyDefinitions).map(([property, value]) => [
@@ -134,6 +224,9 @@ export function updateCalendarProperty(
 				? undefined
 				: config.cardColorProperty,
 	};
+	return wasWritableBoardGroup
+		? clearInvalidBoardGroupReferences(next, [name])
+		: next;
 }
 
 export function removeCalendarProperty(
@@ -148,13 +241,17 @@ export function removeCalendarProperty(
 				copyCalendarPropertyDefinition(definition),
 			]),
 	);
-	return {
+	const next = {
 		...config,
 		propertyDefinitions,
 		visibleProperties: config.visibleProperties.filter((property) => property !== name),
 		cardColorProperty:
 			config.cardColorProperty === name ? undefined : config.cardColorProperty,
 	};
+	return clearInvalidBoardGroupReferences(
+		updateBoardGroupReferences(next, name, undefined),
+		[name],
+	);
 }
 
 export function moveCalendarProperty(

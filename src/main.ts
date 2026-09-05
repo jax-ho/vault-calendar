@@ -1,6 +1,7 @@
 import { Menu, Plugin, TFile } from 'obsidian';
 import { CALENDAR_KEYS, isCalendarDocumentPath } from './domain/config';
 import { CalendarDocumentService } from './services/calendar-document';
+import { CalendarConfigMutationCoordinator } from './services/calendar-config-mutation-coordinator';
 import { CalendarPropertyMigrationService } from './services/calendar-property-migration';
 import {
 	CalendarIndexManager,
@@ -16,6 +17,7 @@ import {
 	CalendarOpenAdapter,
 } from './services/open-adapter';
 import { CalendarStateStore } from './services/state-store';
+import { SavedViewStore } from './services/saved-view-store';
 import { CalendarView } from './ui/calendar-view';
 import { CalendarPickerModal } from './ui/calendar-picker-modal';
 import { CreateCalendarModal } from './ui/create-calendar-modal';
@@ -28,10 +30,17 @@ export default class CalendarViewPlugin extends Plugin {
 	writer!: FrontmatterWriter<TFile>;
 	eventEditor!: EventEditorService<TFile>;
 	propertyMigration!: CalendarPropertyMigrationService<TFile>;
+	savedViews!: SavedViewStore<TFile>;
+	configMutations!: CalendarConfigMutationCoordinator;
 	private views = new Set<CalendarView>();
 
 	async onload(): Promise<void> {
-		this.documents = new CalendarDocumentService(this.app);
+		this.configMutations = new CalendarConfigMutationCoordinator();
+		this.documents = new CalendarDocumentService(
+			this.app,
+			undefined,
+			this.configMutations,
+		);
 		this.indexes = new CalendarIndexManager(createObsidianCalendarIndexPort(this.app));
 		this.openAdapter = new CalendarOpenAdapter(this.app);
 		this.writer = new FrontmatterWriter<TFile>({
@@ -39,6 +48,14 @@ export default class CalendarViewPlugin extends Plugin {
 			processFrontMatter: (file, mutate) =>
 				this.app.fileManager.processFrontMatter(file, mutate),
 		});
+		this.savedViews = new SavedViewStore<TFile>(
+			{
+				getFileByPath: (path) => this.app.vault.getFileByPath(path),
+				processFrontMatter: (file, mutate) =>
+					this.app.fileManager.processFrontMatter(file, mutate),
+			},
+			this.configMutations,
+		);
 		const documentCodec = new ObsidianMarkdownDocumentCodec();
 		this.eventEditor = new EventEditorService(
 			createObsidianEventEditorPort(this.app),
@@ -47,6 +64,7 @@ export default class CalendarViewPlugin extends Plugin {
 		this.propertyMigration = new CalendarPropertyMigrationService(
 			createObsidianPropertyMigrationPort(this.app),
 			documentCodec,
+			this.configMutations,
 		);
 		this.stateStore = new CalendarStateStore(await this.loadData(), (data) =>
 			this.saveData(data),

@@ -1,22 +1,33 @@
 import { Modal, Notice, Setting, setIcon } from 'obsidian';
-import { copyCalendarConfig } from '../domain/calendar-copy';
-import { resolveWeekStart } from '../domain/dates';
+import {
+	copyCalendarConfig,
+	copyCalendarPropertyDefinition,
+} from '../domain/calendar-copy';
 import {
 	addCalendarProperty,
+	clearInvalidBoardGroupReferences,
 	updateCalendarProperty,
+	validatePropertyName,
 } from '../domain/property-schema';
+import { isWritableBoardGroupProperty } from '../domain/saved-views';
 import type CalendarViewPlugin from '../main';
+import type {
+	CalendarPropertyMutation,
+	CalendarSharedConfigField,
+} from '../services/calendar-document';
 import type { CalendarConfig, CalendarPropertyDefinition } from '../types';
 import { PropertyEditorModal } from './property-editor-modal';
 import { renderPropertyManager } from './property-manager';
 import { applyUiLocale } from './ui-locale';
 
-const SUNDAY = 'Sunday';
-
-type SettingsSectionId = 'calendar' | 'fields' | 'properties' | 'view';
+export type CalendarSettingsSectionId =
+	| 'calendar'
+	| 'fields'
+	| 'properties'
+	| 'view';
 
 interface SettingsSectionDefinition {
-	id: SettingsSectionId;
+	id: CalendarSettingsSectionId;
 	label: string;
 	icon: string;
 	description: string;
@@ -29,15 +40,20 @@ export class CalendarSettingsModal extends Modal {
 	private saveQueue: Promise<void> = Promise.resolve();
 	private errorEl?: HTMLElement;
 	private propertyManagerEl?: HTMLElement;
-	private activeSection: SettingsSectionId = 'calendar';
+	private activeSection: CalendarSettingsSectionId;
+	private readonly dirtyFields = new Set<CalendarSharedConfigField>();
+	private readonly propertyMutations: CalendarPropertyMutation[] = [];
+	private readonly revalidateBoardGroups = new Set<string>();
 
 	constructor(
 		private readonly plugin: CalendarViewPlugin,
 		config: CalendarConfig,
 		private readonly onApplied: (config: CalendarConfig) => Promise<void>,
+		initialSection: CalendarSettingsSectionId = 'calendar',
 	) {
 		super(plugin.app);
 		this.draft = copyCalendarConfig(config);
+		this.activeSection = initialSection;
 	}
 
 	onOpen(): void {
@@ -81,7 +97,7 @@ export class CalendarSettingsModal extends Modal {
 				id: 'view',
 				label: 'View',
 				icon: 'layout-grid',
-				description: 'Choose how the calendar starts, lays out, and opens notes.',
+				description: 'Choose how event notes open from any saved view.',
 				render: (container) => this.renderViewSettings(container),
 			},
 		];
@@ -150,7 +166,10 @@ export class CalendarSettingsModal extends Modal {
 		});
 	}
 
-	private activateSection(layout: HTMLElement, active: SettingsSectionId): void {
+	private activateSection(
+		layout: HTMLElement,
+		active: CalendarSettingsSectionId,
+	): void {
 		for (const button of layout.querySelectorAll<HTMLElement>('.cv-settings-nav-item')) {
 			const selected = button.dataset.section === active;
 			button.toggleClass('is-active', selected);
@@ -167,7 +186,7 @@ export class CalendarSettingsModal extends Modal {
 		new Setting(container).setName('Name').addText((text) => {
 			text.setValue(this.draft.name).onChange((value) => {
 				this.draft.name = value.trim() || this.draft.name;
-				this.queueSave();
+				this.queueSave('name');
 			});
 		});
 		new Setting(container)
@@ -176,7 +195,7 @@ export class CalendarSettingsModal extends Modal {
 			.addToggle((toggle) => {
 				toggle.setValue(this.draft.recursive).onChange((value) => {
 					this.draft.recursive = value;
-					this.queueSave();
+					this.queueSave('recursive');
 				});
 			});
 	}
@@ -191,8 +210,15 @@ export class CalendarSettingsModal extends Modal {
 			)
 			.addText((text) => {
 				text.setValue(this.draft.startDateProperty).onChange((value) => {
-					this.draft.startDateProperty = value.trim();
-					this.queueSave();
+					const property = value.trim();
+					const next = { ...this.draft, startDateProperty: property };
+					this.setDraft(
+						isWritableBoardGroupProperty(this.draft, property)
+							? clearInvalidBoardGroupReferences(next, [property])
+							: next,
+					);
+					if (property) this.revalidateBoardGroups.add(property);
+					this.queueSave('startDateProperty');
 				});
 			});
 		new Setting(container)
@@ -201,9 +227,17 @@ export class CalendarSettingsModal extends Modal {
 			.addText((text) => {
 				text.setValue(this.draft.endDateProperty ?? '').onChange((value) => {
 					const trimmed = value.trim();
-					if (trimmed) this.draft.endDateProperty = trimmed;
-					else delete this.draft.endDateProperty;
-					this.queueSave();
+					const shouldClear = isWritableBoardGroupProperty(this.draft, trimmed);
+					const next = { ...this.draft };
+					if (trimmed) next.endDateProperty = trimmed;
+					else delete next.endDateProperty;
+					this.setDraft(
+						shouldClear
+							? clearInvalidBoardGroupReferences(next, [trimmed])
+							: next,
+					);
+					if (trimmed) this.revalidateBoardGroups.add(trimmed);
+					this.queueSave('endDateProperty');
 				});
 			});
 	}
@@ -214,27 +248,6 @@ export class CalendarSettingsModal extends Modal {
 	}
 
 	private renderViewSettings(container: HTMLElement): void {
-		new Setting(container)
-			.setName(`Start week on ${SUNDAY}`)
-			.setDesc(`Show ${SUNDAY} as the first column of the calendar.`)
-			.addToggle((toggle) => {
-				toggle
-					.setValue(resolveWeekStart(this.draft.weekStartsOn) === 'sunday')
-					.onChange((enabled) => {
-						this.draft.weekStartsOn = enabled ? 'sunday' : 'monday';
-						this.queueSave();
-					});
-			});
-		new Setting(container).setName('Layout').addDropdown((dropdown) => {
-			dropdown
-				.addOption('month', 'Month')
-				.addOption('week', 'Week')
-				.setValue(this.draft.layout)
-				.onChange((value) => {
-					this.draft.layout = value as CalendarConfig['layout'];
-					this.queueSave();
-				});
-		});
 		new Setting(container).setName('Open behavior').addDropdown((dropdown) => {
 			dropdown
 				.addOption('same-leaf', 'Same leaf')
@@ -242,7 +255,7 @@ export class CalendarSettingsModal extends Modal {
 				.setValue(this.draft.openBehavior)
 				.onChange((value) => {
 					this.draft.openBehavior = value as CalendarConfig['openBehavior'];
-					this.queueSave();
+					this.queueSave('openBehavior');
 				});
 		});
 	}
@@ -258,7 +271,7 @@ export class CalendarSettingsModal extends Modal {
 						.split(/[\n,]/u)
 						.map((path) => path.trim())
 						.filter(Boolean);
-					this.queueSave();
+					this.queueSave('excludePaths');
 				});
 			});
 	}
@@ -268,9 +281,9 @@ export class CalendarSettingsModal extends Modal {
 		renderPropertyManager(this.propertyManagerEl, this.draft, {
 			onAdd: () => this.openPropertyEditor(),
 			onEdit: (property) => this.openPropertyEditor(property),
-			onChange: (config) => {
-				this.draft = copyCalendarConfig(config);
-				this.queueSave();
+			onChange: (config, mutation) => {
+				this.setDraft(config);
+				this.queuePropertyMutation(mutation);
 				this.renderProperties();
 			},
 		});
@@ -295,7 +308,8 @@ export class CalendarSettingsModal extends Modal {
 				window.clearTimeout(this.saveTimer);
 				this.saveTimer = undefined;
 			}
-			await this.saveQueue;
+			await this.commit();
+			if (this.hasPendingChanges()) return;
 			const nextConfig = await this.plugin.propertyMigration.rename(
 				this.draft,
 				currentName,
@@ -313,26 +327,54 @@ export class CalendarSettingsModal extends Modal {
 			return;
 		}
 
-		let next = this.draft;
+		let next: CalendarConfig;
+		let mutation: CalendarPropertyMutation;
 		if (currentName) {
-			next = updateCalendarProperty(next, name, definition);
+			const expectedDefinition = this.draft.propertyDefinitions[currentName];
+			if (!expectedDefinition) throw new Error(`Property not found: ${currentName}`);
+			next = updateCalendarProperty(this.draft, currentName, definition);
+			mutation = {
+				kind: 'update',
+				property: currentName,
+				expectedDefinition: copyCalendarPropertyDefinition(expectedDefinition),
+				definition: copyCalendarPropertyDefinition(definition),
+			};
 		} else {
-			next = addCalendarProperty(next, name, definition);
+			const property = validatePropertyName(this.draft.propertyDefinitions, name);
+			next = addCalendarProperty(this.draft, property, definition);
+			mutation = {
+				kind: 'add',
+				property,
+				definition: copyCalendarPropertyDefinition(definition),
+			};
 		}
-		this.draft = copyCalendarConfig(next);
-		this.queueSave();
+		this.setDraft(next);
+		this.queuePropertyMutation(mutation);
 		this.renderProperties();
 	}
 
 	onClose(): void {
 		if (this.saveTimer !== undefined) {
 			window.clearTimeout(this.saveTimer);
-			void this.commit();
+			this.saveTimer = undefined;
 		}
+		// Queue one final drain behind any in-flight save. If that save fails, its
+		// dirty fields are restored before this drain takes its snapshot.
+		void this.commit();
 		this.contentEl.empty();
 	}
 
-	private queueSave(): void {
+	private queueSave(...fields: CalendarSharedConfigField[]): void {
+		for (const field of fields) this.dirtyFields.add(field);
+		this.scheduleSave();
+	}
+
+	private queuePropertyMutation(mutation: CalendarPropertyMutation): void {
+		this.propertyMutations.push(mutation);
+		this.scheduleSave();
+	}
+
+	private scheduleSave(): void {
 		if (this.saveTimer !== undefined) window.clearTimeout(this.saveTimer);
 		this.saveTimer = window.setTimeout(() => {
 			this.saveTimer = undefined;
@@ -340,15 +382,42 @@ export class CalendarSettingsModal extends Modal {
 		}, 350);
 	}
 
+	private setDraft(next: CalendarConfig): void {
+		this.draft = copyCalendarConfig(next);
+	}
+
+	private hasPendingChanges(): boolean {
+		return (
+			this.dirtyFields.size > 0 ||
+			this.propertyMutations.length > 0 ||
+			this.revalidateBoardGroups.size > 0
+		);
+	}
+
 	private async commit(): Promise<void> {
-		const snapshot = copyCalendarConfig(this.draft);
 		this.saveQueue = this.saveQueue.then(async () => {
+			if (!this.hasPendingChanges()) return;
+			const snapshot = copyCalendarConfig(this.draft);
+			const changedFields = [...this.dirtyFields];
+			this.dirtyFields.clear();
+			const propertyMutations = this.propertyMutations.splice(0);
+			const revalidateBoardGroups = [...this.revalidateBoardGroups];
+			this.revalidateBoardGroups.clear();
 			try {
 				if (!snapshot.startDateProperty) throw new Error('Start date property cannot be empty.');
-				await this.plugin.documents.save(snapshot);
-				await this.onApplied(snapshot);
+				const committed = await this.plugin.documents.save(snapshot, {
+					changedFields,
+					propertyMutations,
+					revalidateBoardGroups,
+				});
+				await this.onApplied(committed);
 				this.errorEl?.empty();
 			} catch (error) {
+				for (const field of changedFields) this.dirtyFields.add(field);
+				this.propertyMutations.unshift(...propertyMutations);
+				for (const property of revalidateBoardGroups) {
+					this.revalidateBoardGroups.add(property);
+				}
 				this.reportError(error, 'Unable to save settings.');
 			}
 		});

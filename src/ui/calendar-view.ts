@@ -1,69 +1,61 @@
 import {
 	ItemView,
-	Menu,
 	Notice,
 	setIcon,
 	type ViewStateResult,
 	type WorkspaceLeaf,
 } from 'obsidian';
 import {
-	addDays,
-	addMonths,
-	compareDates,
-	monthGrid,
-	resolveWeekStart,
-	sameMonth,
-	todayPlainDate,
-	toUtcDate,
-	weekGrid,
-	type PlainDate,
-} from '../domain/dates';
-import { calendarCardMetrics } from '../domain/card-layout';
-import {
-	moveDateRange,
-	resizeDateRange,
-	type DateRange,
-	type ResizeEdge,
-} from '../domain/interactions';
-import { replaceCalendarDatePart } from '../domain/frontmatter-mutation';
-import {
-	segmentCalendarItems,
-	type CalendarSegment,
-	visibleTrackCount,
-} from '../domain/range-layout';
-import { CALENDAR_VIEW_TYPE } from '../services/open-adapter';
+	fallbackAfterViewRemoval,
+	findSavedView,
+	resolveActiveSavedView,
+} from '../domain/saved-view-selection';
+import { createDefaultSavedViewCatalog } from '../domain/saved-views';
 import type { CalendarIndex } from '../services/calendar-index';
+import { CALENDAR_VIEW_TYPE } from '../services/open-adapter';
 import type CalendarViewPlugin from '../main';
 import type {
 	CalendarConfig,
 	CalendarIndexSnapshot,
-	CalendarItem,
+	BoardSavedView,
+	CalendarSavedView,
+	CalendarUiState,
 	CalendarViewState,
 	ConfigIssue,
+	SavedView,
+	SavedViewCatalog,
+	SavedViewUiState,
+	ViewId,
 } from '../types';
 import {
-	calendarRelationshipAccessibleSummary,
-	calendarRelationshipRowCount,
-	renderCardProperties,
-	renderCardRelationships,
-} from './calendar-card';
+	createCalendarSurface,
+	type CalendarSurfaceState,
+} from './calendar-surface';
+import {
+	createBoardSurface,
+	type BoardSurfaceState,
+} from './board-surface';
 import { CalendarIssuesModal } from './calendar-list-modal';
-import { CalendarSettingsModal } from './calendar-settings-modal';
-import { EventTitleModal } from './event-title-modal';
-import { EventEditorModal } from './event-editor-modal';
-import { applyUiLocale, UI_LOCALE } from './ui-locale';
-
-interface DragSession {
-	item: CalendarItem;
-	targetDate?: PlainDate;
-}
-
-interface ResizeSession {
-	item: CalendarItem;
-	edge: ResizeEdge;
-	pointerId: number;
-	targetDate?: PlainDate;
-}
+import {
+	CalendarSettingsModal,
+	type CalendarSettingsSectionId,
+} from './calendar-settings-modal';
+import {
+	AddSavedViewModal,
+	DeleteSavedViewModal,
+	EditSavedViewModal,
+	RenameSavedViewModal,
+} from './saved-view-modals';
+import {
+	renderSavedViewTabs,
+	savedViewPanelId,
+} from './saved-view-tabs';
+import { applyUiLocale } from './ui-locale';
+import type {
+	ViewSurface,
+	ViewSurfaceDependencies,
+	ViewSurfaceFactory,
+} from './view-surface';
 
 const EMPTY_SNAPSHOT: CalendarIndexSnapshot = {
 	items: [],
@@ -71,25 +63,54 @@ const EMPTY_SNAPSHOT: CalendarIndexSnapshot = {
 	indexedCount: 0,
 };
 
+const VIEW_SURFACE_FACTORIES = {
+	calendar: createCalendarSurface,
+	board: createBoardSurface,
+} satisfies {
+	calendar: ViewSurfaceFactory<CalendarSavedView, CalendarSurfaceState>;
+	board: ViewSurfaceFactory<BoardSavedView, BoardSurfaceState>;
+};
+
+type ActiveSurface =
+	| {
+			type: 'calendar';
+			viewId: ViewId;
+			surface: ViewSurface<CalendarSavedView, CalendarSurfaceState>;
+	  }
+	| {
+			type: 'board';
+			viewId: ViewId;
+			surface: ViewSurface<BoardSavedView, BoardSurfaceState>;
+	  };
+
+interface HostApplyContext {
+	documentPath: string;
+	generation: number;
+}
+
 export class CalendarView extends ItemView {
 	private calendarDocumentPath?: string;
 	private instanceId = '';
 	private config?: CalendarConfig;
 	private configIssues: ConfigIssue[] = [];
 	private indexError?: string;
-	private focusDate: PlainDate = todayPlainDate();
 	private snapshot = EMPTY_SNAPSHOT;
-	private pendingSnapshot?: CalendarIndexSnapshot;
 	private index?: CalendarIndex;
 	private activeIndexPath?: string;
 	private unsubscribeIndex?: () => void;
 	private opened = false;
 	private calendarDeleted = false;
-	private dragSession?: DragSession;
-	private resizeSession?: ResizeSession;
-	private pendingScrollTop?: number;
-	private todayRefreshTimer?: number;
-	private todayRefreshWindow?: Window;
+	private uiState: CalendarUiState = { viewStates: {} };
+	private activeSurface?: ActiveSurface;
+	private sharedChrome?: HTMLElement;
+	private surfaceContainer?: HTMLElement;
+	private loadQueue: Promise<void> = Promise.resolve();
+	private hostGeneration = 0;
+	private indexSubscriptionGeneration = 0;
+	private subscribedHostGeneration?: number;
+	private subscribedIndex?: CalendarIndex;
+	private subscribedIndexPath?: string;
+	private pendingTabFocusViewId?: ViewId;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -97,7 +118,7 @@ export class CalendarView extends ItemView {
 	) {
 		super(leaf);
 		this.icon = 'calendar-days';
-		this.register(() => this.clearTodayRefreshTimer());
+		this.register(() => this.detachSurface());
 	}
 
 	getViewType(): string {
@@ -126,14 +147,20 @@ export class CalendarView extends ItemView {
 			typeof candidate?.instanceId === 'string' && candidate.instanceId
 				? candidate.instanceId
 				: this.createInstanceId();
-		if (
-			this.opened &&
-			this.calendarDocumentPath &&
-			(this.calendarDocumentPath !== nextPath || this.instanceId !== nextInstanceId)
-		) {
-			await this.persistUiState();
+		const identityChanged =
+			this.calendarDocumentPath !== nextPath || this.instanceId !== nextInstanceId;
+		if (identityChanged) this.hostGeneration += 1;
+		if (this.opened && this.calendarDocumentPath && identityChanged) {
+			try {
+				await this.persistAndDetachSurface();
+			} catch (error) {
+				this.ensureActiveIndexSubscription();
+				this.syncSurface();
+				throw error;
+			}
 		}
 		if (this.calendarDocumentPath !== nextPath) this.releaseActiveIndex();
+		if (identityChanged) this.uiState = { viewStates: {} };
 		this.calendarDocumentPath = nextPath;
 		this.instanceId = nextInstanceId;
 		this.calendarDeleted = false;
@@ -141,60 +168,40 @@ export class CalendarView extends ItemView {
 	}
 
 	protected async onOpen(): Promise<void> {
+		this.hostGeneration += 1;
 		this.opened = true;
-		this.scheduleTodayRefresh();
 		applyUiLocale(this.contentEl);
 		this.contentEl.addClass('calendar-view-root');
 		this.contentEl.tabIndex = 0;
 		this.plugin.registerViewInstance(this);
-		this.registerDomEvent(this.contentEl, 'keydown', (event) => this.handleKeydown(event));
-		this.registerDomEvent(this.contentEl, 'contextmenu', (event) => {
-			this.openItemMenu(event);
-		});
-		const ownerWindow = this.contentEl.ownerDocument.defaultView;
-		if (ownerWindow) {
-			this.registerDomEvent(ownerWindow, 'focus', () => {
-				if (!this.opened) return;
-				this.refreshTodayHighlight();
-				this.scheduleTodayRefresh();
-			});
-			this.registerDomEvent(ownerWindow, 'pointermove', (event) => this.handlePointerMove(event));
-			this.registerDomEvent(ownerWindow, 'pointerup', (event) => {
-				void this.handlePointerUp(event);
-			});
-			this.registerDomEvent(ownerWindow, 'pointercancel', (event) => {
-				if (this.resizeSession?.pointerId === event.pointerId) {
-					this.clearInteractionPreview();
-				}
-			});
-		}
 		await this.loadCalendar();
 	}
 
 	protected async onClose(): Promise<void> {
 		this.opened = false;
-		this.clearTodayRefreshTimer();
-		if (!this.calendarDeleted && this.calendarDocumentPath && this.instanceId && this.config) {
-			await this.plugin.stateStore.set(this.calendarDocumentPath, this.instanceId, {
-				focusDate: this.focusDate,
-				layout: this.config.layout,
-				scrollTop: this.contentEl.scrollTop,
-			});
+		this.hostGeneration += 1;
+		try {
+			await this.loadQueue.catch(() => undefined);
+			if (!this.calendarDeleted) await this.persistAndDetachSurface();
+			else this.detachSurface();
+		} finally {
+			this.detachSurface();
+			this.pendingTabFocusViewId = undefined;
+			this.releaseActiveIndex();
+			this.plugin.unregisterViewInstance(this);
 		}
-		this.releaseActiveIndex();
-		this.plugin.unregisterViewInstance(this);
 	}
 
 	async refreshCalendarDocument(): Promise<void> {
-		if (this.dragSession || this.resizeSession) {
-			this.clearInteractionPreview();
-			new Notice('Calendar configuration changed. The active interaction was cancelled.');
-		}
+		this.activeSurface?.surface.cancelInteraction(
+			'Calendar configuration changed. The active interaction was cancelled.',
+		);
 		await this.loadCalendar(true);
 	}
 
 	async handleCalendarRenamed(oldPath: string, newPath: string): Promise<void> {
 		if (this.calendarDocumentPath !== oldPath) return;
+		this.hostGeneration += 1;
 		this.calendarDocumentPath = newPath;
 		this.activeIndexPath = newPath;
 		if (this.config) this.config = { ...this.config, documentPath: newPath };
@@ -205,6 +212,8 @@ export class CalendarView extends ItemView {
 	handleCalendarDeleted(path: string): void {
 		if (this.calendarDocumentPath !== path) return;
 		this.calendarDeleted = true;
+		this.hostGeneration += 1;
+		this.detachSurface();
 		new Notice(`Calendar document deleted: ${path}`);
 		this.leaf.detach();
 	}
@@ -217,158 +226,333 @@ export class CalendarView extends ItemView {
 	}
 
 	private releaseActiveIndex(): void {
-		this.unsubscribeIndex?.();
+		this.clearIndexSubscription();
 		if (this.activeIndexPath) this.plugin.indexes.release(this.activeIndexPath);
-		this.unsubscribeIndex = undefined;
 		this.index = undefined;
 		this.activeIndexPath = undefined;
 		this.config = undefined;
 		this.configIssues = [];
 		this.indexError = undefined;
 		this.snapshot = EMPTY_SNAPSHOT;
-		this.pendingSnapshot = undefined;
-		this.clearInteractionPreview();
 	}
 
-	private async loadCalendar(isRefresh = false): Promise<void> {
+	private clearIndexSubscription(): void {
+		this.indexSubscriptionGeneration += 1;
+		this.unsubscribeIndex?.();
+		this.unsubscribeIndex = undefined;
+		this.subscribedHostGeneration = undefined;
+		this.subscribedIndex = undefined;
+		this.subscribedIndexPath = undefined;
+	}
+
+	private ensureActiveIndexSubscription(): void {
+		const index = this.index;
+		const path = this.activeIndexPath;
+		if (!index || !path || path !== this.calendarDocumentPath) return;
+		if (
+			this.unsubscribeIndex &&
+			this.subscribedHostGeneration === this.hostGeneration &&
+			this.subscribedIndex === index &&
+			this.subscribedIndexPath === path
+		) {
+			return;
+		}
+
+		this.clearIndexSubscription();
+		const subscriptionGeneration = this.indexSubscriptionGeneration + 1;
+		this.indexSubscriptionGeneration = subscriptionGeneration;
+		const hostGeneration = this.hostGeneration;
+		this.subscribedHostGeneration = hostGeneration;
+		this.subscribedIndex = index;
+		this.subscribedIndexPath = path;
+		this.unsubscribeIndex = index.subscribe((snapshot) => {
+			if (
+				!this.isCurrentHost(path, hostGeneration) ||
+				this.indexSubscriptionGeneration !== subscriptionGeneration ||
+				this.index !== index ||
+				this.activeIndexPath !== path
+			) {
+				return;
+			}
+			this.snapshot = snapshot;
+			this.syncSurface();
+		});
+	}
+
+	private loadCalendar(isRefresh = false): Promise<void> {
+		const next = this.loadQueue
+			.catch(() => undefined)
+			.then(() => this.performLoadCalendar(isRefresh));
+		this.loadQueue = next.catch(() => undefined);
+		return next;
+	}
+
+	private async performLoadCalendar(isRefresh: boolean): Promise<void> {
+		if (!this.opened) return;
+		const hostGeneration = this.hostGeneration;
 		const path = this.calendarDocumentPath;
 		if (!path) {
 			this.config = undefined;
 			this.configIssues = [
 				{ field: 'calendar document', message: 'Choose a calendar document to continue.' },
 			];
-			this.render();
+			await this.persistAndDetachSurface();
+			if (this.opened && this.hostGeneration === hostGeneration && !this.calendarDocumentPath) {
+				this.renderDocumentError();
+			}
 			return;
 		}
 		const file = this.app.vault.getFileByPath(path);
 		if (!file) {
 			this.config = undefined;
-			this.configIssues = [{ field: 'calendar document', message: `File not found: ${path}` }];
-			this.render();
+			this.configIssues = [
+				{ field: 'calendar document', message: `File not found: ${path}` },
+			];
+			await this.persistAndDetachSurface();
+			if (this.isCurrentHost(path, hostGeneration)) this.renderDocumentError();
 			return;
 		}
 		const parsed = this.plugin.documents.read(file);
 		if (!parsed.config) {
+			this.config = undefined;
 			this.configIssues = parsed.issues;
-			this.render();
+			await this.persistAndDetachSurface();
+			if (this.isCurrentHost(path, hostGeneration)) this.renderDocumentError();
 			return;
 		}
-		const nextConfig = parsed.config;
-		this.configIssues = this.plugin.documents.validateLocations(nextConfig);
+
 		const previousConfig = this.config;
+		const previousCatalog = previousConfig
+			? this.savedViewCatalog(previousConfig)
+			: undefined;
+		const nextConfig = parsed.config;
 		this.config = nextConfig;
-		if (
-			previousConfig &&
-			(previousConfig.sourceFolder !== nextConfig.sourceFolder ||
-				previousConfig.startDateProperty !== nextConfig.startDateProperty)
-		) {
-			this.focusDate = todayPlainDate();
+		this.configIssues = [
+			...parsed.issues,
+			...this.plugin.documents.validateLocations(nextConfig),
+		];
+		if (!isRefresh || !previousConfig) {
+			this.uiState = this.plugin.stateStore.get(path, this.instanceId) ?? {
+				viewStates: {},
+			};
+		}
+		const nextCatalog = this.savedViewCatalog(nextConfig);
+		this.pruneUiState(nextCatalog);
+		const preferredViewId = this.uiState.activeViewId;
+		if (!findSavedView(nextCatalog, preferredViewId)) {
+			const fallback =
+				preferredViewId && previousCatalog
+					? fallbackAfterViewRemoval(
+							previousCatalog,
+							preferredViewId,
+							nextCatalog,
+						)
+					: resolveActiveSavedView(nextCatalog);
+			this.uiState.activeViewId = fallback?.id;
 		}
 
 		try {
 			if (!this.index || this.activeIndexPath !== path) {
-				this.unsubscribeIndex?.();
-				if (this.activeIndexPath) this.plugin.indexes.release(this.activeIndexPath);
-				this.index = await this.plugin.indexes.acquire(nextConfig);
+				const previousIndexPath = this.activeIndexPath;
+				this.clearIndexSubscription();
+				if (previousIndexPath) this.plugin.indexes.release(previousIndexPath);
+				this.index = undefined;
+				this.activeIndexPath = undefined;
+				const nextIndex = await this.plugin.indexes.acquire(nextConfig);
+				if (!this.isCurrentHost(path, hostGeneration)) {
+					this.plugin.indexes.release(path);
+					return;
+				}
+				this.index = nextIndex;
 				this.activeIndexPath = path;
-				this.unsubscribeIndex = this.index.subscribe((snapshot) => {
-					if (this.dragSession || this.resizeSession) {
-						this.pendingSnapshot = snapshot;
-					} else {
-						this.snapshot = snapshot;
-						this.render();
-					}
-				});
+				this.ensureActiveIndexSubscription();
 			} else {
 				await this.plugin.indexes.updateConfig(nextConfig);
+				if (!this.isCurrentHost(path, hostGeneration)) return;
+				this.ensureActiveIndexSubscription();
 			}
 			this.indexError = undefined;
 		} catch (error) {
-			this.indexError = error instanceof Error ? error.message : 'Unable to index this calendar.';
-			this.render();
+			if (!this.isCurrentHost(path, hostGeneration)) return;
+			this.indexError =
+				error instanceof Error ? error.message : 'Unable to index this calendar.';
+			this.syncSurface();
 			return;
 		}
 
-		if (!isRefresh || !previousConfig) {
-			const stored = this.plugin.stateStore.get(path, this.instanceId);
-			if (stored?.focusDate) this.focusDate = stored.focusDate;
-			if (stored?.scrollTop !== undefined) this.pendingScrollTop = stored.scrollTop;
-		}
 		await this.plugin.stateStore.markRecent(path);
-		this.render();
+		if (this.isCurrentHost(path, hostGeneration)) this.syncSurface();
 	}
 
-	private render(): void {
-		this.contentEl.empty();
-		this.contentEl.addClass('calendar-view-root');
-		const relationshipRows = this.snapshot.items.reduce(
-			(maximum, item) => Math.max(maximum, calendarRelationshipRowCount(item)),
-			0,
+	private isCurrentHost(documentPath: string, generation: number): boolean {
+		return (
+			this.opened &&
+			!this.calendarDeleted &&
+			this.calendarDocumentPath === documentPath &&
+			this.hostGeneration === generation
 		);
-		const cardMetrics = calendarCardMetrics(
-			this.config?.visibleProperties.length ?? 0,
-			relationshipRows,
+	}
+
+	private isCurrentApplyContext(context: HostApplyContext): boolean {
+		return (
+			this.isCurrentHost(context.documentPath, context.generation) &&
+			this.config?.documentPath === context.documentPath
 		);
-		this.contentEl.style.setProperty('--cv-card-height', `${cardMetrics.height}px`);
-		this.contentEl.style.setProperty('--cv-card-step', `${cardMetrics.step}px`);
-		if (!this.config) {
-			this.renderDocumentError();
+	}
+
+	private savedViewCatalog(config: CalendarConfig): SavedViewCatalog {
+		return (
+			config.viewCatalog ??
+			createDefaultSavedViewCatalog(config.layout, config.weekStartsOn)
+		);
+	}
+
+	private activeDefinition(): SavedView | undefined {
+		if (!this.config) return undefined;
+		return resolveActiveSavedView(
+			this.savedViewCatalog(this.config),
+			this.uiState.activeViewId,
+		);
+	}
+
+	private syncSurface(): void {
+		if (!this.opened || this.calendarDeleted) return;
+		const config = this.config;
+		const definition = this.activeDefinition();
+		if (!config || !definition) {
+			const detached = this.detachSurface();
+			if (detached) void this.persistUiState(detached.viewId, detached.state);
+			this.renderUnavailableSurface();
 			return;
 		}
 
-		const root = this.contentEl.createDiv({ cls: 'cv-shell' });
-		this.renderViewToolbar(root);
-		if (this.configIssues.length > 0) this.renderConfigBanner(root);
-		this.renderDateToolbar(root);
-		if (this.indexError) this.renderIndexError(root);
-		if (!this.indexError && this.snapshot.items.length === 0) {
-			root.createDiv({
-				cls: 'cv-empty-hint',
-				text: `No scheduled notes in ${this.config.sourceFolder || 'the vault root'} using ${this.config.startDateProperty}.`,
+		const input = {
+			definition,
+			config,
+			configIssues: this.configIssues,
+			snapshot: this.snapshot,
+			indexError: this.indexError,
+		};
+		const active = this.activeSurface;
+		if (active?.viewId === definition.id && active.type === definition.type) {
+			this.prepareSurfaceContainer(definition);
+			if (active.type === 'calendar' && definition.type === 'calendar') {
+				active.surface.update({ ...input, definition });
+			}
+			if (active.type === 'board' && definition.type === 'board') {
+				active.surface.update({ ...input, definition });
+			}
+			this.renderSharedChrome();
+			return;
+		}
+
+		const restoreTabFocus = this.focusedViewTabId() !== undefined;
+		this.detachSurface();
+		if (restoreTabFocus) this.pendingTabFocusViewId = definition.id;
+		this.uiState.activeViewId = definition.id;
+		const hostContext: HostApplyContext = {
+			documentPath: config.documentPath,
+			generation: this.hostGeneration,
+		};
+		const dependencies: ViewSurfaceDependencies = {
+			plugin: this.plugin,
+			getActiveIndex: () => this.index,
+			applySavedViewCatalog: (catalog) =>
+				this.applySavedViewCatalog(catalog, undefined, hostContext),
+			persistUiState: (viewId, state) => this.persistUiState(viewId, state),
+			editView: (view) => this.openEditView(view),
+			openProperties: () => this.openSettings('properties'),
+			retry: () => this.loadCalendar(true),
+		};
+		this.createHostFrame();
+		if (!this.surfaceContainer) throw new Error('Calendar host frame was not created.');
+		this.prepareSurfaceContainer(definition);
+		if (definition.type === 'calendar') {
+			const surface = VIEW_SURFACE_FACTORIES.calendar(dependencies);
+			this.activeSurface = { type: 'calendar', viewId: definition.id, surface };
+			surface.mount(this.surfaceContainer, {
+				...input,
+				definition,
+				state: this.uiState.viewStates[definition.id],
+			});
+		} else {
+			const surface = VIEW_SURFACE_FACTORIES.board(dependencies);
+			this.activeSurface = { type: 'board', viewId: definition.id, surface };
+			surface.mount(this.surfaceContainer, {
+				...input,
+				definition,
+				state: this.uiState.viewStates[definition.id],
 			});
 		}
-		this.renderGrid(root);
-		if (this.pendingScrollTop !== undefined) {
-			const scrollTop = this.pendingScrollTop;
-			this.pendingScrollTop = undefined;
-			this.contentEl.ownerDocument.defaultView?.requestAnimationFrame(() => {
-				this.contentEl.scrollTop = scrollTop;
-			});
-		}
+		this.renderSharedChrome();
+		void this.persistCurrentUiState();
 	}
 
-	private scheduleTodayRefresh(): void {
-		this.clearTodayRefreshTimer();
-		const ownerWindow = this.contentEl.ownerDocument.defaultView;
-		if (!ownerWindow || !this.opened) return;
-		const now = new Date();
-		const elapsedInMinute = now.getSeconds() * 1_000 + now.getMilliseconds();
-		const delay = 60_000 - elapsedInMinute + 100;
-		this.todayRefreshWindow = ownerWindow;
-		this.todayRefreshTimer = ownerWindow.setTimeout(() => {
-			this.todayRefreshTimer = undefined;
-			this.todayRefreshWindow = undefined;
-			if (!this.opened) return;
-			this.refreshTodayHighlight();
-			this.scheduleTodayRefresh();
-		}, delay);
+	private detachSurface():
+		| { viewId: ViewId; state: SavedViewUiState }
+		| undefined {
+		const active = this.activeSurface;
+		this.activeSurface = undefined;
+		this.sharedChrome = undefined;
+		this.surfaceContainer = undefined;
+		if (!active) return undefined;
+		const state = active.surface.deactivate();
+		const keepState =
+			!this.config || this.catalogContainsId(this.savedViewCatalog(this.config), active.viewId);
+		this.uiState = {
+			activeViewId: keepState ? active.viewId : this.uiState.activeViewId,
+			viewStates: keepState
+				? { ...this.uiState.viewStates, [active.viewId]: state }
+				: { ...this.uiState.viewStates },
+		};
+		return keepState ? { viewId: active.viewId, state } : undefined;
 	}
 
-	private clearTodayRefreshTimer(): void {
-		if (this.todayRefreshTimer === undefined) return;
-		this.todayRefreshWindow?.clearTimeout(this.todayRefreshTimer);
-		this.todayRefreshTimer = undefined;
-		this.todayRefreshWindow = undefined;
+	private async persistAndDetachSurface(): Promise<void> {
+		const detached = this.detachSurface();
+		if (detached) await this.persistUiState(detached.viewId, detached.state);
 	}
 
-	private refreshTodayHighlight(): void {
-		const today = todayPlainDate();
-		for (const cell of this.contentEl.querySelectorAll<HTMLElement>('.cv-day-cell')) {
-			cell.toggleClass('is-today', cell.dataset.date === today);
-		}
+	private async persistUiState(
+		viewId: ViewId,
+		state: SavedViewUiState,
+	): Promise<void> {
+		const path = this.calendarDocumentPath;
+		if (!path || !this.instanceId || this.calendarDeleted) return;
+		this.uiState = {
+			activeViewId:
+				this.activeSurface?.viewId === viewId
+					? viewId
+					: this.uiState.activeViewId,
+			viewStates: { ...this.uiState.viewStates, [viewId]: { ...state } },
+		};
+		this.renderSharedChrome();
+		await this.plugin.stateStore.set(path, this.instanceId, this.uiState);
+	}
+
+	private async persistCurrentUiState(): Promise<void> {
+		const path = this.calendarDocumentPath;
+		if (!path || !this.instanceId || this.calendarDeleted) return;
+		await this.plugin.stateStore.set(path, this.instanceId, this.uiState);
+	}
+
+	private async applyConfig(
+		config: CalendarConfig,
+		context: HostApplyContext,
+	): Promise<void> {
+		if (!this.isCurrentApplyContext(context)) return;
+		this.config = config;
+		this.configIssues = this.plugin.documents.validateLocations(config);
+		await this.plugin.indexes.updateConfig(config);
+		if (this.isCurrentApplyContext(context)) this.syncSurface();
 	}
 
 	private renderDocumentError(): void {
+		if (!this.opened || this.calendarDeleted) return;
+		this.contentEl.empty();
+		this.sharedChrome = undefined;
+		this.surfaceContainer = undefined;
+		this.contentEl.addClass('calendar-view-root');
 		const state = this.contentEl.createDiv({ cls: 'cv-document-error' });
 		state.createEl('h2', { text: 'Calendar document needs attention' });
 		state.createEl('p', {
@@ -382,13 +566,101 @@ export class CalendarView extends ItemView {
 		button.addEventListener('click', () => void this.openSourceDocument());
 	}
 
-	private renderViewToolbar(root: HTMLElement): void {
+	private renderUnavailableSurface(): void {
 		if (!this.config) return;
+		this.createHostFrame();
+		this.renderSharedChrome();
+		const state = this.surfaceContainer?.createDiv({ cls: 'cv-document-error' });
+		if (!state) return;
+		state.createEl('h2', { text: 'Calendar view unavailable' });
+		state.createEl('p', {
+			text: 'Repair or add an available saved view in the source document.',
+		});
+		const button = state.createEl('button', { text: 'Open source document' });
+		button.addEventListener('click', () => void this.openSourceDocument());
+	}
+
+	private async openSourceDocument(): Promise<void> {
+		if (!this.calendarDocumentPath) return;
+		const file = this.app.vault.getFileByPath(this.calendarDocumentPath);
+		if (!file) {
+			new Notice(`Calendar document not found: ${this.calendarDocumentPath}`);
+			return;
+		}
+		await this.plugin.openAdapter.openMarkdownFile(file, true);
+	}
+
+	private createHostFrame(): void {
+		this.contentEl.empty();
+		this.contentEl.addClass('calendar-view-root');
+		const shell = this.contentEl.createDiv({ cls: 'cv-shell' });
+		this.sharedChrome = shell.createDiv({ cls: 'cv-shared-chrome' });
+		this.surfaceContainer = shell.createDiv({ cls: 'cv-view-surface' });
+	}
+
+	private prepareSurfaceContainer(definition: SavedView): void {
+		const container = this.surfaceContainer;
+		if (!container) return;
+		container.id = savedViewPanelId(this.viewIdPrefix(), definition.id);
+		container.setAttribute('role', 'tabpanel');
+		container.setAttribute('aria-label', definition.name);
+	}
+
+	private viewIdPrefix(): string {
+		return `cv-${this.instanceId.replaceAll(/[^a-zA-Z0-9_-]/gu, '-')}`;
+	}
+
+	private renderSharedChrome(): void {
+		const root = this.sharedChrome;
+		const config = this.config;
+		if (!root || !config) return;
+		const activeElement = root.ownerDocument.activeElement as HTMLElement | null;
+		const focusedViewId =
+			activeElement && root.contains(activeElement)
+				? activeElement.closest<HTMLElement>('.cv-view-tab')?.dataset.viewId
+				: this.pendingTabFocusViewId;
+		root.empty();
+		this.renderViewToolbar(root);
+		if (this.configIssues.length > 0) this.renderConfigBanner(root);
+		if (this.indexError) this.renderIndexError(root);
+		if (focusedViewId) {
+			const tab = [...root.querySelectorAll<HTMLElement>('.cv-view-tab')].find(
+				(candidate) => candidate.dataset.viewId === focusedViewId,
+			);
+			if (tab) {
+				tab.focus();
+				this.pendingTabFocusViewId = undefined;
+			}
+		}
+	}
+
+	private focusedViewTabId(): ViewId | undefined {
+		const activeElement = this.contentEl.ownerDocument.activeElement as HTMLElement | null;
+		if (!activeElement || !this.contentEl.contains(activeElement)) return undefined;
+		return activeElement.closest<HTMLElement>('.cv-view-tab')?.dataset.viewId;
+	}
+
+	private renderViewToolbar(root: HTMLElement): void {
+		const config = this.config;
+		if (!config) return;
 		const toolbar = root.createDiv({ cls: 'cv-toolbar cv-view-toolbar' });
 		const identity = toolbar.createDiv({ cls: 'cv-calendar-identity' });
-		identity.createSpan({ cls: 'cv-calendar-name', text: this.config.name });
+		identity.createSpan({ cls: 'cv-calendar-name', text: config.name });
 		const sourceButton = this.iconButton(identity, 'file-text', 'Open source document');
 		sourceButton.addEventListener('click', () => void this.openSourceDocument());
+		renderSavedViewTabs(
+			toolbar,
+			this.savedViewCatalog(config),
+			this.uiState.activeViewId,
+			this.viewIdPrefix(),
+			{
+				onActivate: (view) => this.activateView(view),
+				onAdd: () => this.openAddView(),
+				onEdit: (view) => this.openEditView(view),
+				onRename: (view) => this.openRenameView(view),
+				onDelete: (view) => this.openDeleteView(view),
+			},
+		);
 
 		const actions = toolbar.createDiv({ cls: 'cv-toolbar-actions' });
 		if (this.snapshot.issues.length > 0) {
@@ -401,9 +673,14 @@ export class CalendarView extends ItemView {
 		}
 		const settings = this.iconButton(actions, 'settings-2', 'Calendar settings');
 		settings.addEventListener('click', () => this.openSettings());
-		const newButton = actions.createEl('button', { text: 'New' });
-		newButton.setAttribute('aria-label', `Create note on ${this.focusDate}`);
-		newButton.addEventListener('click', () => this.createEvent(this.focusDate));
+		const primaryAction = this.activeSurface?.surface.primaryAction();
+		if (primaryAction) {
+			const button = actions.createEl('button', { text: primaryAction.label });
+			button.setAttribute('aria-label', primaryAction.ariaLabel);
+			button.addEventListener('click', () =>
+				this.activeSurface?.surface.primaryAction().run(),
+			);
+		}
 	}
 
 	private renderConfigBanner(root: HTMLElement): void {
@@ -422,422 +699,6 @@ export class CalendarView extends ItemView {
 		retry.addEventListener('click', () => void this.loadCalendar(true));
 	}
 
-	private renderDateToolbar(root: HTMLElement): void {
-		if (!this.config) return;
-		const toolbar = root.createDiv({ cls: 'cv-toolbar cv-date-toolbar' });
-		toolbar.createEl('h2', { cls: 'cv-interval-title', text: this.intervalTitle() });
-		const actions = toolbar.createDiv({ cls: 'cv-toolbar-actions' });
-		const previous = this.iconButton(actions, 'chevron-left', 'Previous interval');
-		previous.addEventListener('click', () => this.navigate(-1));
-		const today = actions.createEl('button', { text: 'Today' });
-		today.addEventListener('click', () => this.setFocusDate(todayPlainDate()));
-		const next = this.iconButton(actions, 'chevron-right', 'Next interval');
-		next.addEventListener('click', () => this.navigate(1));
-		const layout = actions.createEl('select', { cls: 'dropdown cv-layout-select' });
-		layout.setAttribute('aria-label', 'Calendar layout');
-		layout.createEl('option', { text: 'Month', value: 'month' });
-		layout.createEl('option', { text: 'Week', value: 'week' });
-		layout.value = this.config.layout;
-		layout.addEventListener('change', () => {
-			void this.changeLayout(layout.value === 'week' ? 'week' : 'month');
-		});
-	}
-
-	private renderGrid(root: HTMLElement): void {
-		if (!this.config) return;
-		const weekStart = resolveWeekStart(this.config.weekStartsOn);
-		const dates =
-			this.config.layout === 'month'
-				? monthGrid(this.focusDate, weekStart)
-				: weekGrid(this.focusDate, weekStart);
-		const grid = root.createDiv({ cls: `cv-calendar-grid is-${this.config.layout}` });
-		const weekdayHeader = grid.createDiv({ cls: 'cv-weekday-header' });
-		for (const date of dates.slice(0, 7)) {
-			weekdayHeader.createDiv({ cls: 'cv-weekday', text: this.weekdayLabel(date) });
-		}
-
-		const segments = segmentCalendarItems(this.snapshot.items, dates);
-		for (let weekIndex = 0; weekIndex < dates.length / 7; weekIndex += 1) {
-			const week = grid.createDiv({ cls: 'cv-week-row' });
-			week.style.setProperty(
-				'--cv-visible-tracks',
-				String(Math.max(1, visibleTrackCount(segments, weekIndex))),
-			);
-			const weekDates = dates.slice(weekIndex * 7, weekIndex * 7 + 7);
-			for (const date of weekDates) {
-				this.renderDayCell(week, date);
-			}
-			const segmentLayer = week.createDiv({ cls: 'cv-segment-layer' });
-			for (const segment of segments) {
-				if (segment.weekIndex === weekIndex) {
-					this.renderSegment(segmentLayer, segment);
-				}
-			}
-			week.addEventListener('dragover', (event) => {
-				if (!this.dragSession) return;
-				const date = this.dateFromWeekPoint(week, event.clientX);
-				if (!date) return;
-				event.preventDefault();
-				this.updateDragPreview(date);
-			});
-			week.addEventListener('drop', (event) => {
-				const date = this.dateFromWeekPoint(week, event.clientX);
-				if (!date) return;
-				event.preventDefault();
-				void this.dropOnDate(date);
-			});
-		}
-	}
-
-	private renderDayCell(week: HTMLElement, date: PlainDate): void {
-		const cell = week.createDiv({ cls: 'cv-day-cell' });
-		cell.dataset.date = date;
-		cell.tabIndex = 0;
-		cell.setAttribute('role', 'gridcell');
-		if (!sameMonth(date, this.focusDate) && this.config?.layout === 'month') {
-			cell.addClass('is-outside-month');
-		}
-		const dayOfWeek = toUtcDate(date).getUTCDay();
-		if (dayOfWeek === 0 || dayOfWeek === 6) cell.addClass('is-weekend');
-		if (date === todayPlainDate()) cell.addClass('is-today');
-		const header = cell.createDiv({ cls: 'cv-day-header' });
-		const addButton = header.createEl('button', {
-			cls: 'cv-add-day clickable-icon',
-			attr: { type: 'button' },
-		});
-		setIcon(addButton, 'plus');
-		addButton.setAttribute('aria-label', `Create note on ${date}`);
-		addButton.setAttribute('title', `Create note on ${date}`);
-		addButton.addEventListener('click', () => this.createEvent(date));
-		header.createSpan({
-			cls: 'cv-day-number',
-			text: this.dayLabel(date),
-		});
-	}
-
-	private renderSegment(layer: HTMLElement, segment: CalendarSegment): void {
-		if (!this.config) return;
-		const card = layer.createDiv({ cls: 'cv-event-card cv-color-token' });
-		card.dataset.path = segment.item.path;
-		card.dataset.color = segment.item.color ?? 'default';
-		card.style.setProperty('--cv-column-start', String(segment.startColumn));
-		card.style.setProperty('--cv-span', String(segment.span));
-		card.style.setProperty('--cv-track', String(segment.track));
-		card.tabIndex = 0;
-		card.setAttribute('role', 'button');
-		const relationshipSummary = calendarRelationshipAccessibleSummary(segment.item);
-		card.setAttribute(
-			'aria-label',
-			[segment.item.title, segment.item.start, relationshipSummary]
-				.filter(Boolean)
-				.join(', '),
-		);
-		card.setAttribute('title', segment.item.title);
-		card.draggable = true;
-		if (segment.item.end) card.addClass('is-multiday');
-		if (segment.continuesBefore) card.addClass('continues-before');
-		if (segment.continuesAfter) card.addClass('continues-after');
-
-		card.createDiv({ cls: 'cv-card-title', text: segment.item.title });
-		renderCardRelationships(card, segment.item);
-		renderCardProperties(
-			this.app,
-			card,
-			segment.item,
-			this.config.visibleProperties,
-			this.config.propertyDefinitions,
-			this.config.cardColorProperty,
-		);
-		card.addEventListener('click', (event) => {
-			if ((event.target as HTMLElement).closest('.cv-resize-handle')) return;
-			void this.openItem(segment.item, event.metaKey || event.ctrlKey);
-		});
-		card.addEventListener('auxclick', (event) => {
-			if (event.button === 1) void this.openItem(segment.item, true);
-		});
-		card.addEventListener('keydown', (event) => {
-			if (event.key === 'Enter' || event.key === ' ') {
-				event.preventDefault();
-				void this.openItem(segment.item, event.metaKey || event.ctrlKey);
-			}
-		});
-		card.addEventListener('dragstart', (event) => {
-			this.dragSession = { item: segment.item };
-			event.dataTransfer?.setData('text/plain', segment.item.path);
-			if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-			this.markOriginalCards(segment.item.path, true);
-		});
-		card.addEventListener('dragend', () => this.clearInteractionPreview());
-
-		if (this.config.endDateProperty && !segment.continuesBefore) {
-			this.renderResizeHandle(card, segment.item, 'start');
-		}
-		if (this.config.endDateProperty && !segment.continuesAfter) {
-			this.renderResizeHandle(card, segment.item, 'end');
-		}
-	}
-
-	private renderResizeHandle(card: HTMLElement, item: CalendarItem, edge: ResizeEdge): void {
-		const handle = card.createDiv({ cls: `cv-resize-handle is-${edge}` });
-		handle.setAttribute('role', 'separator');
-		handle.setAttribute('aria-label', `Resize ${edge} date for ${item.title}`);
-		handle.tabIndex = 0;
-		handle.addEventListener('pointerdown', (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			this.resizeSession = { item, edge, pointerId: event.pointerId };
-			this.markOriginalCards(item.path, true);
-			this.markPreviewRange({ start: item.start, end: item.end });
-		});
-		handle.addEventListener('keydown', (event) => {
-			if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-			event.preventDefault();
-			event.stopPropagation();
-			const current = edge === 'start' ? item.start : (item.end ?? item.start);
-			const target = addDays(current, event.key === 'ArrowLeft' ? -1 : 1);
-			try {
-				const next = resizeDateRange(item.start, item.end, edge, target);
-				void this.writeDateRange(item, next).catch((error: unknown) => {
-					new Notice(error instanceof Error ? error.message : 'Unable to resize event.');
-				});
-			} catch (error) {
-				new Notice(error instanceof Error ? error.message : 'Unable to resize event.');
-			}
-		});
-	}
-
-	private handlePointerMove(event: PointerEvent): void {
-		const session = this.resizeSession;
-		if (!session || session.pointerId !== event.pointerId) return;
-		const date = this.dateFromPoint(event.clientX, event.clientY);
-		if (!date) return;
-		try {
-			const next = resizeDateRange(session.item.start, session.item.end, session.edge, date);
-			session.targetDate = date;
-			this.markPreviewRange(next);
-		} catch {
-			this.clearDatePreviewClasses();
-		}
-	}
-
-	private async handlePointerUp(event: PointerEvent): Promise<void> {
-		const session = this.resizeSession;
-		if (!session || session.pointerId !== event.pointerId) return;
-		this.resizeSession = undefined;
-		if (!session.targetDate) {
-			this.clearInteractionPreview();
-			return;
-		}
-		try {
-			const next = resizeDateRange(
-				session.item.start,
-				session.item.end,
-				session.edge,
-				session.targetDate,
-			);
-			await this.writeDateRange(session.item, next);
-		} catch (error) {
-			new Notice(error instanceof Error ? error.message : 'Unable to resize event.');
-		} finally {
-			this.clearInteractionPreview();
-		}
-	}
-
-	private updateDragPreview(targetDate: PlainDate): void {
-		if (!this.dragSession) return;
-		this.dragSession.targetDate = targetDate;
-		this.markPreviewRange(
-			moveDateRange(
-				this.dragSession.item.start,
-				this.dragSession.item.end,
-				targetDate,
-			),
-		);
-	}
-
-	private async dropOnDate(date: PlainDate): Promise<void> {
-		const session = this.dragSession;
-		if (!session) return;
-		try {
-			const next = moveDateRange(session.item.start, session.item.end, date);
-			await this.writeDateRange(session.item, next);
-		} catch (error) {
-			new Notice(error instanceof Error ? error.message : 'Unable to move event.');
-		} finally {
-			this.clearInteractionPreview();
-		}
-	}
-
-	private async writeDateRange(item: CalendarItem, range: DateRange): Promise<void> {
-		if (!this.config) return;
-		await this.plugin.writer.updateDateRange(
-			item.path,
-			item.mtime,
-			{
-				startProperty: this.config.startDateProperty,
-				endProperty: this.config.endDateProperty,
-			},
-			range,
-		);
-		const file = this.app.vault.getFileByPath(item.path);
-		this.snapshot = {
-			...this.snapshot,
-			items: this.snapshot.items.map((candidate) => {
-				if (candidate.path !== item.path) return candidate;
-				const properties = { ...candidate.properties };
-				const startProperty = this.config?.startDateProperty ?? 'date';
-				properties[startProperty] = replaceCalendarDatePart(
-					properties[startProperty],
-					range.start,
-				);
-				if (this.config?.endDateProperty) {
-					if (range.end) {
-						properties[this.config.endDateProperty] = replaceCalendarDatePart(
-							properties[this.config.endDateProperty] ?? properties[startProperty],
-							range.end,
-						);
-					} else delete properties[this.config.endDateProperty];
-				}
-				const updated: CalendarItem = {
-					...candidate,
-					start: range.start,
-					properties,
-					mtime: file?.stat.mtime ?? candidate.mtime,
-				};
-				if (range.end) updated.end = range.end;
-				else delete updated.end;
-				return updated;
-			}),
-		};
-		this.render();
-	}
-
-	private markPreviewRange(range: DateRange): void {
-		this.clearDatePreviewClasses();
-		const end = range.end ?? range.start;
-		for (const cell of this.contentEl.querySelectorAll<HTMLElement>('.cv-day-cell')) {
-			const date = cell.dataset.date;
-			if (date && compareDates(date, range.start) >= 0 && compareDates(date, end) <= 0) {
-				cell.addClass('is-drag-target');
-			}
-		}
-	}
-
-	private clearDatePreviewClasses(): void {
-		for (const cell of this.contentEl.querySelectorAll<HTMLElement>('.is-drag-target')) {
-			cell.removeClass('is-drag-target');
-		}
-	}
-
-	private markOriginalCards(path: string, active: boolean): void {
-		for (const card of this.contentEl.querySelectorAll<HTMLElement>('.cv-event-card')) {
-			if (card.dataset.path === path) card.toggleClass('is-dragging', active);
-		}
-	}
-
-	private clearInteractionPreview(): void {
-		if (this.dragSession) this.markOriginalCards(this.dragSession.item.path, false);
-		if (this.resizeSession) this.markOriginalCards(this.resizeSession.item.path, false);
-		this.dragSession = undefined;
-		this.resizeSession = undefined;
-		this.clearDatePreviewClasses();
-		if (this.pendingSnapshot) {
-			this.snapshot = this.pendingSnapshot;
-			this.pendingSnapshot = undefined;
-			this.render();
-		}
-	}
-
-	private dateFromPoint(clientX: number, clientY: number): PlainDate | undefined {
-		for (const week of this.contentEl.querySelectorAll<HTMLElement>('.cv-week-row')) {
-			const bounds = week.getBoundingClientRect();
-			if (clientY >= bounds.top && clientY <= bounds.bottom) {
-				return this.dateFromWeekPoint(week, clientX);
-			}
-		}
-		return undefined;
-	}
-
-	private dateFromWeekPoint(week: HTMLElement, clientX: number): PlainDate | undefined {
-		const bounds = week.getBoundingClientRect();
-		if (clientX < bounds.left || clientX > bounds.right || bounds.width <= 0) return undefined;
-		const column = Math.min(6, Math.floor(((clientX - bounds.left) / bounds.width) * 7));
-		return week.querySelectorAll<HTMLElement>('.cv-day-cell')[column]?.dataset.date;
-	}
-
-	private async openSourceDocument(): Promise<void> {
-		if (!this.calendarDocumentPath) return;
-		const file = this.app.vault.getFileByPath(this.calendarDocumentPath);
-		if (!file) {
-			new Notice(`Calendar document not found: ${this.calendarDocumentPath}`);
-			return;
-		}
-		await this.plugin.openAdapter.openMarkdownFile(file, true);
-	}
-
-	private async openItem(item: CalendarItem, newLeaf: boolean): Promise<void> {
-		const file = this.app.vault.getFileByPath(item.path);
-		if (!file) {
-			new Notice(`${item.path} was moved or deleted. The calendar will refresh.`);
-			this.plugin.indexes.handleFileDeleted(item.path);
-			return;
-		}
-		if (!newLeaf && this.config) {
-			new EventEditorModal(
-				this.plugin,
-				this.config,
-				item,
-				{
-					parentItems: this.index?.parentCandidatesFor(item.path) ?? [],
-					validateParentItem: (value) =>
-						this.index?.validateParentItem(item.path, value),
-				},
-			).open();
-			return;
-		}
-		await this.plugin.openAdapter.openMarkdownFile(file, true);
-	}
-
-	private openItemMenu(event: MouseEvent): void {
-		const targetNode = event.targetNode;
-		const target =
-			targetNode?.nodeType === 1
-				? (targetNode as HTMLElement)
-				: targetNode?.parentElement;
-		const card = target?.closest<HTMLElement>('.cv-event-card');
-		const path = card?.dataset.path;
-		if (!card || !path || !this.contentEl.contains(card)) return;
-		event.preventDefault();
-		event.stopPropagation();
-		const menu = new Menu();
-		menu.addItem((menuItem) => {
-			menuItem
-				.setTitle('Move to trash')
-				.setIcon('trash-2')
-				.setWarning(true)
-				.onClick(() => {
-					void this.moveItemToTrash(path);
-				});
-		});
-		menu.showAtMouseEvent(event);
-	}
-
-	private async moveItemToTrash(path: string): Promise<void> {
-		const file = this.app.vault.getFileByPath(path);
-		if (!file) {
-			new Notice(`${path} was moved or deleted. The calendar will refresh.`);
-			this.plugin.indexes.handleFileDeleted(path);
-			return;
-		}
-		try {
-			await this.app.fileManager.trashFile(file);
-		} catch (error) {
-			new Notice(
-				error instanceof Error ? error.message : 'Unable to move event to trash.',
-			);
-		}
-	}
-
 	private openIssues(): void {
 		new CalendarIssuesModal(this.app, this.snapshot.issues, async (path) => {
 			const file = this.app.vault.getFileByPath(path);
@@ -849,137 +710,147 @@ export class CalendarView extends ItemView {
 		}).open();
 	}
 
-	private openSettings(): void {
-		if (!this.config) return;
-		new CalendarSettingsModal(this.plugin, this.config, async (config) => {
-			await this.applyConfig(config);
-		}).open();
+	private activateView(view: SavedView): void {
+		const config = this.config;
+		if (!config || this.uiState.activeViewId === view.id) return;
+		const current = findSavedView(this.savedViewCatalog(config), view.id);
+		if (!current) return;
+		this.uiState = { ...this.uiState, activeViewId: current.id };
+		this.syncSurface();
 	}
 
-	private createEvent(date: PlainDate): void {
-		if (!this.config) return;
-		new EventTitleModal(
+	private openAddView(): void {
+		const config = this.config;
+		if (!config) return;
+		const catalog = this.savedViewCatalog(config);
+		if (!catalog.canMutate) return;
+		const context: HostApplyContext = {
+			documentPath: config.documentPath,
+			generation: this.hostGeneration,
+		};
+		new AddSavedViewModal(
 			this.plugin,
-			this.config,
-			date,
-			this.index?.parentCandidatesFor() ?? [],
+			config,
+			catalog,
+			this.uiState.activeViewId,
+			(nextCatalog, viewId) =>
+				this.applySavedViewCatalog(nextCatalog, viewId, context),
+			() => {
+				if (this.isCurrentApplyContext(context)) this.openSettings('properties');
+			},
 		).open();
 	}
 
-	private navigate(direction: -1 | 1): void {
-		if (!this.config) return;
-		this.setFocusDate(
-			this.config.layout === 'month'
-				? addMonths(this.focusDate, direction)
-				: addDays(this.focusDate, direction * 7),
+	private openEditView(view: SavedView): void {
+		const config = this.config;
+		if (!config || !this.savedViewCatalog(config).canMutate) return;
+		const context: HostApplyContext = {
+			documentPath: config.documentPath,
+			generation: this.hostGeneration,
+		};
+		new EditSavedViewModal(
+			this.plugin,
+			config,
+			view,
+			(nextCatalog) => this.applySavedViewCatalog(nextCatalog, undefined, context),
+		).open();
+	}
+
+	private openRenameView(view: SavedView): void {
+		const config = this.config;
+		if (!config) return;
+		const catalog = this.savedViewCatalog(config);
+		if (!catalog.canMutate) return;
+		const context: HostApplyContext = {
+			documentPath: config.documentPath,
+			generation: this.hostGeneration,
+		};
+		new RenameSavedViewModal(
+			this.plugin,
+			config.documentPath,
+			catalog,
+			view,
+			(nextCatalog) => this.applySavedViewCatalog(nextCatalog, undefined, context),
+		).open();
+	}
+
+	private openDeleteView(view: SavedView): void {
+		const config = this.config;
+		if (!config) return;
+		const previousCatalog = this.savedViewCatalog(config);
+		if (!previousCatalog.canMutate) return;
+		const context: HostApplyContext = {
+			documentPath: config.documentPath,
+			generation: this.hostGeneration,
+		};
+		new DeleteSavedViewModal(
+			this.plugin,
+			config.documentPath,
+			view,
+			(nextCatalog) => {
+				if (!this.isCurrentApplyContext(context)) return;
+				const viewStates = { ...this.uiState.viewStates };
+				delete viewStates[view.id];
+				this.uiState = { ...this.uiState, viewStates };
+				const fallback =
+					this.uiState.activeViewId === view.id
+						? fallbackAfterViewRemoval(previousCatalog, view.id, nextCatalog)
+						: undefined;
+				this.applySavedViewCatalog(nextCatalog, fallback?.id, context);
+			},
+		).open();
+	}
+
+	private applySavedViewCatalog(
+		catalog: SavedViewCatalog,
+		activeViewId?: ViewId,
+		context?: HostApplyContext,
+	): void {
+		if (!this.config || (context && !this.isCurrentApplyContext(context))) return;
+		this.config = { ...this.config, viewCatalog: catalog };
+		if (activeViewId) this.uiState = { ...this.uiState, activeViewId };
+		this.pruneUiState(catalog);
+		this.syncSurface();
+	}
+
+	private catalogContainsId(catalog: SavedViewCatalog, viewId: ViewId): boolean {
+		return catalog.entries.some((entry) =>
+			entry.kind === 'valid' ? entry.definition.id === viewId : entry.id === viewId,
 		);
 	}
 
-	private setFocusDate(date: PlainDate): void {
-		this.focusDate = date;
-		void this.persistUiState();
-		this.render();
+	private pruneUiState(catalog: SavedViewCatalog): void {
+		const entriesById = new Map(
+			catalog.entries.flatMap((entry) => {
+				const id = entry.kind === 'valid' ? entry.definition.id : entry.id;
+				return id ? [[id, entry] as const] : [];
+			}),
+		);
+		const viewStates = Object.fromEntries(
+			Object.entries(this.uiState.viewStates).filter(([viewId, state]) => {
+				const entry = entriesById.get(viewId);
+				return (
+					entry !== undefined &&
+					(entry.kind !== 'valid' || entry.definition.type === state.type)
+				);
+			}),
+		);
+		this.uiState = { ...this.uiState, viewStates };
 	}
 
-	private async changeLayout(layout: CalendarConfig['layout']): Promise<void> {
-		if (!this.config || this.config.layout === layout) return;
-		const next = { ...this.config, layout };
-		try {
-			await this.plugin.documents.save(next);
-			await this.applyConfig(next);
-		} catch (error) {
-			new Notice(error instanceof Error ? error.message : 'Unable to change layout.');
-			this.render();
-		}
-	}
-
-	private async applyConfig(config: CalendarConfig): Promise<void> {
-		const previous = this.config;
-		this.config = config;
-		this.configIssues = this.plugin.documents.validateLocations(config);
-		if (
-			previous &&
-			(previous.sourceFolder !== config.sourceFolder ||
-				previous.startDateProperty !== config.startDateProperty)
-		) {
-			this.focusDate = todayPlainDate();
-		}
-		await this.plugin.indexes.updateConfig(config);
-		await this.persistUiState();
-		this.render();
-	}
-
-	private async persistUiState(): Promise<void> {
-		if (!this.calendarDocumentPath || !this.instanceId || !this.config) return;
-		await this.plugin.stateStore.set(this.calendarDocumentPath, this.instanceId, {
-			focusDate: this.focusDate,
-			layout: this.config.layout,
-			scrollTop: this.contentEl.scrollTop,
-		});
-	}
-
-	private handleKeydown(event: KeyboardEvent): void {
-		if (event.defaultPrevented || event.altKey || event.metaKey || event.ctrlKey) return;
-		const target = event.target as HTMLElement;
-		if (target.matches('input, textarea, select')) return;
-		let nextDate: PlainDate | undefined;
-		if (event.key.toLocaleLowerCase() === 't') nextDate = todayPlainDate();
-		else if (event.key === 'ArrowLeft') nextDate = addDays(this.focusDate, -1);
-		else if (event.key === 'ArrowRight') nextDate = addDays(this.focusDate, 1);
-		else if (event.key === 'ArrowUp') nextDate = addDays(this.focusDate, -7);
-		else if (event.key === 'ArrowDown') nextDate = addDays(this.focusDate, 7);
-		else if (event.key === 'Enter' && target === this.contentEl) {
-			this.createEvent(this.focusDate);
-			event.preventDefault();
-			return;
-		} else if (event.key === 'Escape') {
-			this.clearInteractionPreview();
-			return;
-		}
-		if (nextDate) {
-			event.preventDefault();
-			this.setFocusDate(nextDate);
-		}
-	}
-
-	private intervalTitle(): string {
-		if (this.config?.layout === 'week') {
-			const dates = weekGrid(this.focusDate, resolveWeekStart(this.config.weekStartsOn));
-			const first = dates[0] ?? this.focusDate;
-			const last = dates.at(-1) ?? this.focusDate;
-			return `${this.shortDate(first)} – ${this.shortDate(last)}`;
-		}
-		return new Intl.DateTimeFormat(UI_LOCALE, {
-			month: 'long',
-			year: 'numeric',
-			timeZone: 'UTC',
-		}).format(toUtcDate(this.focusDate));
-	}
-
-	private shortDate(date: PlainDate): string {
-		return new Intl.DateTimeFormat(UI_LOCALE, {
-			month: 'short',
-			day: 'numeric',
-			year: 'numeric',
-			timeZone: 'UTC',
-		}).format(toUtcDate(date));
-	}
-
-	private weekdayLabel(date: PlainDate): string {
-		return new Intl.DateTimeFormat(UI_LOCALE, {
-			weekday: 'short',
-			timeZone: 'UTC',
-		}).format(toUtcDate(date));
-	}
-
-	private dayLabel(date: PlainDate): string {
-		const parsed = toUtcDate(date);
-		if (parsed.getUTCDate() !== 1) return String(parsed.getUTCDate());
-		return new Intl.DateTimeFormat(UI_LOCALE, {
-			month: 'short',
-			day: 'numeric',
-			timeZone: 'UTC',
-		}).format(parsed);
+	private openSettings(initialSection: CalendarSettingsSectionId = 'calendar'): void {
+		const config = this.config;
+		if (!config) return;
+		const context: HostApplyContext = {
+			documentPath: config.documentPath,
+			generation: this.hostGeneration,
+		};
+		new CalendarSettingsModal(
+			this.plugin,
+			config,
+			(nextConfig) => this.applyConfig(nextConfig, context),
+			initialSection,
+		).open();
 	}
 
 	private iconButton(parent: HTMLElement, icon: string, label: string): HTMLButtonElement {

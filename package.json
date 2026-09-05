@@ -2,7 +2,7 @@
 	"name": "vault-calendar",
 	"version": "0.1.7",
 	"private": true,
-	"description": "A property-driven calendar for Markdown notes in Obsidian.",
+	"description": "Property-driven calendar and board views for Markdown notes in Obsidian.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
@@ -14,7 +14,7 @@
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint ."
 	},
-	"keywords": ["obsidian", "obsidian-plugin", "calendar", "markdown"],
+	"keywords": ["obsidian", "obsidian-plugin", "calendar", "board", "markdown"],
 	"author": "Jax Ho",
 	"license": "0-BSD",
 	"repository": {

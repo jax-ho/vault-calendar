@@ -1,18 +1,20 @@
 # Vault Calendar
 
-Turn Markdown notes into a visual calendar without moving your data out of Obsidian.
+Turn Markdown notes into calendar and board views without moving your data out of Obsidian.
 
-Vault Calendar gives each event a familiar calendar card while keeping the source of truth in ordinary Markdown files. You can create and edit events from the calendar, organize them with properties, and schedule work across a single day or a date range.
+Vault Calendar gives each event a familiar card while keeping the source of truth in ordinary Markdown files. You can create and edit events, organize them with properties, and switch between multiple saved views over the same notes.
 
 ## What you can do
 
 - Create multiple independent calendars inside one vault.
-- View events by month or by week.
+- Create multiple Calendar and Board views over the same event notes.
+- Give each Calendar view its own Month or Week layout and week start.
+- Group Board cards by a Select property and drag them between columns.
 - Create events with a title, properties, and Markdown notes.
 - Organize tasks with one parent item and any number of derived sub-items.
 - Edit an event in a focused popup with automatic saving.
-- Drag cards to move events to another date.
-- Resize cards to change their start and end dates.
+- Drag Calendar cards to another day to move their date range.
+- Resize Calendar cards to change their start and end dates.
 - Add Select, Checkbox, Text, and Number properties.
 - Give Select options their own colors and use one Select property to color cards.
 - Show existing Markdown notes when they contain the calendar's date property.
@@ -31,7 +33,7 @@ Vault Calendar gives each event a familiar calendar card while keeping the sourc
 2. Select **Browse** and search for **Vault Calendar**.
 3. Select **Install**, then **Enable**.
 
-If Vault Calendar does not appear in the Community Plugins browser yet, use the manual installation method below.
+If you prefer to install release assets directly, use the manual installation method below.
 
 ### Manual installation
 
@@ -67,12 +69,12 @@ The resulting structure is:
 
 You do not need to create or edit `_calendar.md` manually.
 
-New calendars start with two properties:
+New calendars start with two Select properties:
 
 - `status`: Not started, Blocked, In progress, Abandoned, or Done.
 - `type`: Task, Learn, or Idea.
 
-You can change or remove these options and add your own properties later.
+Both also include the required `None` option. You can change or remove the other options and add your own properties later.
 
 ## Open a calendar
 
@@ -85,17 +87,30 @@ Use whichever method is most convenient:
 
 The document icon beside the calendar name opens the underlying `_calendar.md` source note.
 
+## Add and manage views
+
+Each calendar can contain multiple saved views over the same event notes. Move the pointer over the view tabs, select the **+** button that appears after them, choose a view type, give it a name, and configure it. The button also appears when the view list receives keyboard focus.
+
+- **Calendar**: choose Month or Week and set when the week starts. These settings belong only to that Calendar view.
+- **Board**: choose **Group by** from the calendar's Select properties. Each option, including `None`, becomes a column.
+
+You can also switch Month or Week from the Calendar date toolbar. That change is saved only to the active Calendar view.
+
+You can create multiple views of either type. Right-click a view tab to select **Edit view**, **Rename**, or **Delete view**. With the tab focused, you can also use the Menu key or Shift+F10. A calendar must always keep at least one view, and deleting a view never deletes event notes.
+
+Dragging a card between Board columns changes only the Select property chosen in **Group by**. The card's dates, notes, and other properties remain unchanged.
+
 ## Add an event
 
-Move your pointer over a day and select the **+** button in its upper-left corner. You can also select **New** in the calendar toolbar to create an event on the currently focused date.
+In a Calendar view, move your pointer over a day and select the **+** button in its upper-left corner. The toolbar's **New** button uses the currently focused date. In a Board view, **New** uses today's date.
 
-Before creating the event, you can enter:
+In the popup, you can enter:
 
 - A title.
 - Values for the calendar's configured properties.
 - Markdown notes.
 
-Select **Create** when you are ready. The popup closes, the calendar stays open, and the new event appears immediately.
+There is no **Create** button. When you are ready, close the popup with its close button, by selecting outside it, or by pressing Escape. Closing creates the event while keeping the calendar open. Pressing Enter in the title field does not submit or close the popup.
 
 Each event is saved as a separate Markdown note in the calendar folder. Vault Calendar adds a short unique suffix to the filename, so two events can use the same title without overwriting each other. The title displayed on the card comes from the note's `title` property, not from that suffix.
 
@@ -119,9 +134,11 @@ Changes save automatically. The editor shows **Saving…**, **Saved**, or **Not 
 
 Select **Open note** when you want the full Obsidian Markdown editor.
 
-## Move and resize events
+Right-click an event card and select **Move to trash** when you want to delete its note through Obsidian.
 
-- Drag an event card to another day to move the complete event.
+## Move and resize events in Calendar views
+
+- In a Calendar view, drag an event card to another day to move the complete event.
 - Drag the left or right edge of a card to change its start or end date.
 - Multi-day events continue across week boundaries automatically.
 
@@ -172,15 +189,11 @@ Every Select property includes `None` as its required empty option. If an event 
 
 The **Card color** setting links the event card background to one Select property. For example, linking card color to `status` lets Done, Blocked, and In progress events use their configured colors.
 
-Renaming a property through Calendar settings updates that property name in the calendar schema and in existing event notes. Deleting a property from the calendar does not remove the old value from existing notes.
+Renaming a property through Calendar settings updates that property name in the calendar schema, existing event notes, and saved Board views that group by it. Deleting a property from the calendar does not remove the old value from existing notes; affected Board views return to a setup state until another Select property is chosen.
 
 ### View
 
-- Start the week on Monday or Sunday.
-- Use Month or Week layout.
 - Open full notes in the current leaf or in a new tab.
-
-You can also switch between Month and Week directly from the calendar toolbar.
 
 ## Use existing Markdown notes
 
@@ -218,7 +231,7 @@ Run **Vault Calendar: Create calendar document** again whenever you need another
 - Date fields.
 - Property definitions and Select options.
 - Card colors.
-- View settings.
+- Saved views and note-opening behavior.
 
 This keeps unrelated calendars independent while allowing all of them to remain normal parts of the same vault.
 
@@ -233,7 +246,7 @@ Check that:
 - The note is not covered by **Excluded paths**.
 - The configured start-date property exists and contains a valid date.
 
-The calendar toolbar shows an **unscheduled** button when it finds notes with missing or invalid date information.
+The calendar toolbar shows an **unscheduled** issue count when it finds notes with missing or invalid dates or invalid parent relationships. Select it to inspect the affected notes.
 
 ### I only see `_calendar.md` as a Markdown file
 
@@ -245,7 +258,7 @@ Yes, but Calendar settings is the safer interface. Manual changes are read liter
 
 ### What happens if I delete `_calendar.md`?
 
-The calendar view is removed, but the other Markdown notes in its folder are not deleted.
+Any open Vault Calendar pane for it closes, but the other Markdown notes in its folder are not deleted.
 
 ### Does Vault Calendar sync my events?
 
@@ -253,7 +266,8 @@ Vault Calendar does not provide its own sync service. Your notes can still sync 
 
 ## Current limitations
 
-- Month and Week views are all-day layouts; there is no hourly schedule.
+- Calendar views use all-day Month or Week layouts; there is no hourly schedule.
+- Board views group only by Select properties. They do not yet support filters, sorting, column reordering, manual card ordering, or unscheduled notes.
 - Search, filtering, recurring events, reminders, and configurable sorting are not available yet.
 - Google Calendar, Apple Calendar, and other external calendar services are not supported.
 - Mobile and touch-specific interactions are not supported.
@@ -263,6 +277,19 @@ Vault Calendar does not provide its own sync service. Your notes can still sync 
 Vault Calendar runs locally. It does not use telemetry, cloud storage, or network requests, and it never uploads your note contents, filenames, or properties.
 
 Your calendar definitions and events remain Markdown files that you can read, edit, move, back up, and version with normal Obsidian tools.
+
+## Development
+
+Development requires Node.js 20.19 or later and npm:
+
+```bash
+npm ci
+npm run dev
+```
+
+`npm run dev` watches the TypeScript source and rebuilds `main.js`. Before sharing a change, run `npm run check` to execute the tests, lint, typecheck, and production build. Generated `main.js` output is intentionally ignored by Git.
+
+See the [Saved views and Board v1 design](docs/board-view-design.md) for the current architecture and acceptance record. Published changes are documented on the [GitHub Releases](https://github.com/jax-ho/vault-calendar/releases) page.
 
 ## Support
 

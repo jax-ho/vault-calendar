@@ -25,6 +25,59 @@ export interface CalendarPropertyDefinition {
 	default?: string | number | boolean;
 }
 
+export type ViewId = string;
+
+export type SavedViewType = 'calendar' | 'board';
+
+export interface SavedViewBase {
+	id: ViewId;
+	name: string;
+}
+
+export interface CalendarSavedView extends SavedViewBase {
+	type: 'calendar';
+	layout: CalendarLayout;
+	weekStartsOn: WeekStartsOn;
+}
+
+export interface BoardSavedView extends SavedViewBase {
+	type: 'board';
+	groupBy?: string;
+}
+
+export type SavedView = CalendarSavedView | BoardSavedView;
+
+export interface ViewConfigIssue extends ConfigIssue {
+	viewId?: ViewId;
+}
+
+export type SavedViewCatalogEntry =
+	| {
+			kind: 'valid';
+			definition: SavedView;
+			warnings?: ViewConfigIssue[];
+	  }
+	| {
+			kind: 'invalid';
+			id?: string;
+			name?: string;
+			raw: unknown;
+			issues: ViewConfigIssue[];
+	  }
+	| {
+			kind: 'unsupported';
+			id?: string;
+			name?: string;
+			viewType?: string;
+			raw: unknown;
+	  };
+
+export interface SavedViewCatalog {
+	source: 'legacy' | 'canonical';
+	entries: SavedViewCatalogEntry[];
+	canMutate: boolean;
+}
+
 export interface CalendarConfig {
 	documentPath: string;
 	name: string;
@@ -35,7 +88,14 @@ export interface CalendarConfig {
 	visibleProperties: string[];
 	propertyDefinitions: Record<string, CalendarPropertyDefinition>;
 	cardColorProperty?: string;
+	/**
+	 * Parsed and newly-created configs always provide this catalog. It remains optional
+	 * temporarily so callers can migrate from the pre-saved-view CalendarConfig shape.
+	 */
+	viewCatalog?: SavedViewCatalog;
+	/** Transitional facade; saved-view-aware callers read CalendarSavedView.weekStartsOn. */
 	weekStartsOn: WeekStartsOn;
+	/** Transitional facade; saved-view-aware callers read CalendarSavedView.layout. */
 	layout: CalendarLayout;
 	openBehavior: OpenBehavior;
 	createFolder: string;
@@ -93,10 +153,21 @@ export interface CalendarIndexSnapshot {
 	indexedCount: number;
 }
 
+export type SavedViewUiState =
+	| {
+			type: 'calendar';
+			focusDate: string;
+			scrollTop?: number;
+	  }
+	| {
+			type: 'board';
+			scrollLeft?: number;
+			scrollTop?: number;
+	  };
+
 export interface CalendarUiState {
-	focusDate: string;
-	layout?: CalendarLayout;
-	scrollTop?: number;
+	activeViewId?: ViewId;
+	viewStates: Record<ViewId, SavedViewUiState>;
 }
 
 export interface CalendarDocumentState {

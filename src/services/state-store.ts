@@ -2,6 +2,7 @@ import type {
 	CalendarDocumentState,
 	CalendarPluginData,
 	CalendarUiState,
+	SavedViewUiState,
 } from '../types';
 import { isPlainDate } from '../domain/dates';
 
@@ -10,7 +11,16 @@ export const DEFAULT_PLUGIN_DATA: CalendarPluginData = {
 };
 
 function cloneUiState(state: CalendarUiState): CalendarUiState {
-	return { ...state };
+	const cloned: CalendarUiState = {
+		viewStates: Object.fromEntries(
+			Object.entries(state.viewStates).map(([viewId, viewState]) => [
+				viewId,
+				{ ...viewState },
+			]),
+		),
+	};
+	if (state.activeViewId !== undefined) cloned.activeViewId = state.activeViewId;
+	return cloned;
 }
 
 function cloneDocumentState(state: CalendarDocumentState): CalendarDocumentState {
@@ -52,19 +62,72 @@ export function normalizePluginData(value: unknown): CalendarPluginData {
 }
 
 function normalizeUiState(value: unknown): CalendarUiState | undefined {
-	if (!value || typeof value !== 'object') return undefined;
-	const candidate = value as Partial<CalendarUiState>;
-	if (typeof candidate.focusDate !== 'string' || !isPlainDate(candidate.focusDate)) {
+	if (!isRecord(value)) return undefined;
+
+	if (isRecord(value.viewStates)) {
+		const viewStates: Record<string, SavedViewUiState> = {};
+		for (const [viewId, rawViewState] of Object.entries(value.viewStates)) {
+			const viewState = normalizeSavedViewUiState(rawViewState);
+			if (viewState) viewStates[viewId] = viewState;
+		}
+		const state: CalendarUiState = { viewStates };
+		if (typeof value.activeViewId === 'string' && value.activeViewId.length > 0) {
+			state.activeViewId = value.activeViewId;
+		}
+		return state;
+	}
+
+	return normalizeLegacyUiState(value);
+}
+
+function normalizeSavedViewUiState(value: unknown): SavedViewUiState | undefined {
+	if (!isRecord(value)) return undefined;
+	if (value.type === 'calendar') {
+		if (typeof value.focusDate !== 'string' || !isPlainDate(value.focusDate)) {
+			return undefined;
+		}
+		const state: SavedViewUiState = {
+			type: 'calendar',
+			focusDate: value.focusDate,
+		};
+		const scrollTop = normalizeScrollOffset(value.scrollTop);
+		if (scrollTop !== undefined) state.scrollTop = scrollTop;
+		return state;
+	}
+	if (value.type === 'board') {
+		const state: SavedViewUiState = { type: 'board' };
+		const scrollLeft = normalizeScrollOffset(value.scrollLeft);
+		if (scrollLeft !== undefined) state.scrollLeft = scrollLeft;
+		const scrollTop = normalizeScrollOffset(value.scrollTop);
+		if (scrollTop !== undefined) state.scrollTop = scrollTop;
+		return state;
+	}
+	return undefined;
+}
+
+function normalizeLegacyUiState(value: Record<string, unknown>): CalendarUiState | undefined {
+	if (typeof value.focusDate !== 'string' || !isPlainDate(value.focusDate)) {
 		return undefined;
 	}
-	const state: CalendarUiState = { focusDate: candidate.focusDate };
-	if (candidate.layout === 'month' || candidate.layout === 'week') {
-		state.layout = candidate.layout;
-	}
-	if (typeof candidate.scrollTop === 'number' && Number.isFinite(candidate.scrollTop)) {
-		state.scrollTop = Math.max(0, candidate.scrollTop);
-	}
-	return state;
+	const calendarState: SavedViewUiState = {
+		type: 'calendar',
+		focusDate: value.focusDate,
+	};
+	const scrollTop = normalizeScrollOffset(value.scrollTop);
+	if (scrollTop !== undefined) calendarState.scrollTop = scrollTop;
+	return {
+		activeViewId: 'calendar',
+		viewStates: { calendar: calendarState },
+	};
+}
+
+function normalizeScrollOffset(value: unknown): number | undefined {
+	if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+	return Math.max(0, value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export class CalendarStateStore {

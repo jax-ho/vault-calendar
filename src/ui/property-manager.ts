@@ -1,4 +1,5 @@
 import { Setting, setIcon } from 'obsidian';
+import { copyCalendarPropertyDefinition } from '../domain/calendar-copy';
 import {
 	propertyTypeIcon,
 	propertyTypeLabel,
@@ -12,11 +13,15 @@ import type {
 	CalendarConfig,
 	CalendarPropertyDefinition,
 } from '../types';
+import type { CalendarPropertyMutation } from '../services/calendar-document';
 
 interface PropertyManagerCallbacks {
 	onAdd: () => void;
 	onEdit: (property: string) => void;
-	onChange: (config: CalendarConfig) => void;
+	onChange: (
+		config: CalendarConfig,
+		mutation: CalendarPropertyMutation,
+	) => void;
 }
 
 function defaultSummary(definition: CalendarPropertyDefinition): string {
@@ -54,7 +59,15 @@ export function renderPropertyManager(
 				.setTooltip('Show on event cards')
 				.setValue(config.visibleProperties.includes(property))
 				.onChange((visible) => {
-					callbacks.onChange(setCalendarPropertyVisibility(config, property, visible));
+					callbacks.onChange(
+						setCalendarPropertyVisibility(config, property, visible),
+						{
+							kind: 'set-visibility',
+							property,
+							expectedVisible: config.visibleProperties.includes(property),
+							visible,
+						},
+					);
 				});
 		});
 		setting.addExtraButton((button) => {
@@ -63,7 +76,12 @@ export function renderPropertyManager(
 				.setTooltip('Move up')
 				.setDisabled(index === 0)
 				.onClick(() => {
-					callbacks.onChange(moveCalendarProperty(config, property, -1));
+					const next = moveCalendarProperty(config, property, -1);
+					callbacks.onChange(next, {
+						kind: 'reorder',
+						expectedOrder: Object.keys(config.propertyDefinitions),
+						order: Object.keys(next.propertyDefinitions),
+					});
 				});
 		});
 		setting.addExtraButton((button) => {
@@ -72,7 +90,12 @@ export function renderPropertyManager(
 				.setTooltip('Move down')
 				.setDisabled(index === entries.length - 1)
 				.onClick(() => {
-					callbacks.onChange(moveCalendarProperty(config, property, 1));
+					const next = moveCalendarProperty(config, property, 1);
+					callbacks.onChange(next, {
+						kind: 'reorder',
+						expectedOrder: Object.keys(config.propertyDefinitions),
+						order: Object.keys(next.propertyDefinitions),
+					});
 				});
 		});
 		setting.addExtraButton((button) => {
@@ -90,7 +113,11 @@ export function renderPropertyManager(
 						`Delete the ${property} property from this calendar? Existing event notes will not be changed.`,
 					);
 					if (confirmed) {
-						callbacks.onChange(removeCalendarProperty(config, property));
+						callbacks.onChange(removeCalendarProperty(config, property), {
+							kind: 'remove',
+							property,
+							expectedDefinition: copyCalendarPropertyDefinition(definition),
+						});
 					}
 				});
 		});
@@ -119,7 +146,11 @@ export function renderPropertyManager(
 					const next = { ...config };
 					if (property) next.cardColorProperty = property;
 					else delete next.cardColorProperty;
-					callbacks.onChange(next);
+					callbacks.onChange(next, {
+						kind: 'set-card-color',
+						expectedProperty: config.cardColorProperty,
+						property: property || undefined,
+					});
 				});
 		});
 }

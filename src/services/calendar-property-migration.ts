@@ -1,9 +1,11 @@
 import {
-	applyCalendarConfigToFrontmatter,
+	applyCalendarConfigWithSavedViewsToFrontmatter,
 	isCalendarDocumentPath,
+	parseCalendarConfig,
 } from '../domain/config';
 import {
 	renameCalendarProperty,
+	sameCalendarPropertyDefinition,
 	updateCalendarProperty,
 	validatePropertyName,
 } from '../domain/property-schema';
@@ -14,6 +16,7 @@ import type {
 } from '../types';
 import { ExternalModificationError, MissingFileError } from './frontmatter-writer';
 import type { MarkdownDocumentCodec } from './markdown-document';
+import { CalendarConfigMutationCoordinator } from './calendar-config-mutation-coordinator';
 
 export interface CalendarPropertyMigrationFile {
 	path: string;
@@ -36,6 +39,14 @@ interface FileChange<TFile extends CalendarPropertyMigrationFile> {
 	writtenContent?: string;
 }
 
+interface CurrentCalendar<TFile extends CalendarPropertyMigrationFile> {
+	file: TFile;
+	originalContent: string;
+	frontmatter: Record<string, unknown>;
+	body: string;
+	config: CalendarConfig;
+}
+
 function hasOwn(frontmatter: Record<string, unknown>, property: string): boolean {
 	return Object.prototype.hasOwnProperty.call(frontmatter, property);
 }
@@ -46,6 +57,7 @@ export class CalendarPropertyMigrationService<
 	constructor(
 		private readonly port: CalendarPropertyMigrationPort<TFile>,
 		private readonly codec: MarkdownDocumentCodec,
+		private readonly configCoordinator: CalendarConfigMutationCoordinator,
 	) {}
 
 	async rename(
@@ -54,6 +66,34 @@ export class CalendarPropertyMigrationService<
 		nextName: string,
 		definition: CalendarPropertyDefinition,
 	): Promise<CalendarConfig> {
+		return this.configCoordinator.run(config.documentPath, async () => {
+			const currentCalendar = await this.readCurrentCalendar(config.documentPath);
+			return this.renameCurrent(
+				currentCalendar,
+				currentName,
+				nextName,
+				definition,
+				config.propertyDefinitions[currentName],
+			);
+		});
+	}
+
+	private async renameCurrent(
+		currentCalendar: CurrentCalendar<TFile>,
+		currentName: string,
+		nextName: string,
+		definition: CalendarPropertyDefinition,
+		expectedDefinition: CalendarPropertyDefinition | undefined,
+	): Promise<CalendarConfig> {
+		const config = currentCalendar.config;
+		if (
+			!sameCalendarPropertyDefinition(
+				expectedDefinition,
+				config.propertyDefinitions[currentName],
+			)
+		) {
+			throw new ExternalModificationError(config.documentPath);
+		}
 		const property = validatePropertyName(
 			config.propertyDefinitions,
 			nextName,
@@ -65,9 +105,42 @@ export class CalendarPropertyMigrationService<
 		const eventChanges = property === currentName
 			? []
 			: await this.prepareEventChanges(config, currentName, property);
-		const calendarChange = await this.prepareCalendarChange(nextConfig);
+		const calendarChange = this.prepareCalendarChange(
+			currentCalendar,
+			nextConfig,
+		);
 		await this.applyChanges([...eventChanges, calendarChange]);
 		return nextConfig;
+	}
+
+	private async readCurrentCalendar(
+		documentPath: string,
+	): Promise<CurrentCalendar<TFile>> {
+		const file = this.port.getFileByPath(documentPath);
+		if (!file) throw new MissingFileError(documentPath);
+		const originalContent = await this.port.read(file);
+		const decoded = this.codec.decode(originalContent);
+		const parsed = parseCalendarConfig(documentPath, decoded.frontmatter);
+		if (!parsed.config) {
+			const details = parsed.issues
+				.map((issue) => `${issue.field}: ${issue.message}`)
+				.join('; ');
+			throw new Error(
+				`Cannot migrate properties in an invalid calendar document${details ? `: ${details}` : '.'}`,
+			);
+		}
+		if (!parsed.config.viewCatalog?.canMutate) {
+			throw new Error(
+				'Cannot migrate properties while the saved-view catalog is structurally invalid.',
+			);
+		}
+		return {
+			file,
+			originalContent,
+			frontmatter: decoded.frontmatter,
+			body: decoded.body,
+			config: parsed.config,
+		};
 	}
 
 	private async prepareEventChanges(
@@ -109,21 +182,18 @@ export class CalendarPropertyMigrationService<
 		return changes;
 	}
 
-	private async prepareCalendarChange(
+	private prepareCalendarChange(
+		current: CurrentCalendar<TFile>,
 		config: CalendarConfig,
-	): Promise<FileChange<TFile>> {
-		const file = this.port.getFileByPath(config.documentPath);
-		if (!file) throw new MissingFileError(config.documentPath);
-		const originalContent = await this.port.read(file);
-		const decoded = this.codec.decode(originalContent);
-		applyCalendarConfigToFrontmatter(decoded.frontmatter, config);
+	): FileChange<TFile> {
+		applyCalendarConfigWithSavedViewsToFrontmatter(current.frontmatter, config);
 		return {
-			file,
-			originalContent,
+			file: current.file,
+			originalContent: current.originalContent,
 			nextContent: this.codec.encode(
-				originalContent,
-				decoded.frontmatter,
-				decoded.body,
+				current.originalContent,
+				current.frontmatter,
+				current.body,
 			),
 		};
 	}

@@ -31,8 +31,38 @@ export class MissingFileError extends Error {
 	}
 }
 
+export class FrontmatterWriteAbortedError extends Error {
+	constructor() {
+		super('The interaction was cancelled before the change was written.');
+		this.name = 'AbortError';
+	}
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+	if (signal?.aborted) throw new FrontmatterWriteAbortedError();
+}
+
 export class FrontmatterWriter<TFile extends WritableFile> {
 	constructor(private readonly port: FrontmatterWritePort<TFile>) {}
+
+	private async mutate(
+		path: string,
+		expectedMtime: number,
+		mutate: (frontmatter: Record<string, unknown>) => void,
+		signal?: AbortSignal,
+	): Promise<void> {
+		throwIfAborted(signal);
+		const file = this.port.getFileByPath(path);
+		if (!file) throw new MissingFileError(path);
+		if (file.stat.mtime !== expectedMtime) throw new ExternalModificationError(path);
+		await this.port.processFrontMatter(file, (frontmatter) => {
+			throwIfAborted(signal);
+			if (file.stat.mtime !== expectedMtime) {
+				throw new ExternalModificationError(path);
+			}
+			mutate(frontmatter);
+		});
+	}
 
 	async updateDateRange(
 		path: string,
@@ -40,12 +70,20 @@ export class FrontmatterWriter<TFile extends WritableFile> {
 		mapping: DateFieldMapping,
 		nextRange: DateRange,
 	): Promise<void> {
-		const file = this.port.getFileByPath(path);
-		if (!file) throw new MissingFileError(path);
-		if (file.stat.mtime !== expectedMtime) throw new ExternalModificationError(path);
-		await this.port.processFrontMatter(file, (frontmatter) => {
-			if (file.stat.mtime !== expectedMtime) throw new ExternalModificationError(path);
+		await this.mutate(path, expectedMtime, (frontmatter) => {
 			applyDateRangeMutation(frontmatter, mapping, nextRange);
 		});
+	}
+
+	async updateProperty(
+		path: string,
+		expectedMtime: number,
+		property: string,
+		value: unknown,
+		signal?: AbortSignal,
+	): Promise<void> {
+		await this.mutate(path, expectedMtime, (frontmatter) => {
+			frontmatter[property] = value;
+		}, signal);
 	}
 }

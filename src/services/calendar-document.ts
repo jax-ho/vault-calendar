@@ -7,12 +7,26 @@ import {
 } from 'obsidian';
 import {
 	applyCalendarConfigToFrontmatter,
+	applyCalendarConfigWithSavedViewsToFrontmatter,
 	defaultCalendarPropertyDefinitions,
 	isCalendarDocumentPath,
 	normalizeVaultPath,
 	parseCalendarConfig,
 } from '../domain/config';
+import { copyCalendarConfig } from '../domain/calendar-copy';
+import {
+	applyCalendarPropertyMutation,
+	copyCalendarPropertyMutation,
+} from '../domain/calendar-property-mutation';
+import type { CalendarPropertyMutation } from '../domain/calendar-property-mutation';
 import { parseCalendarDate, type PlainDate } from '../domain/dates';
+import { clearInvalidBoardGroupReferences } from '../domain/property-schema';
+import {
+	applySavedViewCatalogToFrontmatter,
+	createDefaultSavedViewCatalog,
+	isWritableBoardGroupProperty,
+	parseSavedViewCatalog,
+} from '../domain/saved-views';
 import {
 	uniqueEventMarkdownPath,
 	uniqueMarkdownPath,
@@ -32,12 +46,68 @@ import type {
 	ConfigIssue,
 } from '../types';
 import { isCalendarDocument } from './calendar-index';
+import { CalendarConfigMutationCoordinator } from './calendar-config-mutation-coordinator';
+import { ObsidianMarkdownDocumentCodec } from './obsidian-markdown-document';
 
 export interface CreateCalendarInput {
 	name: string;
 	documentFolder: string;
 	startDateProperty: string;
 	endDateProperty?: string;
+}
+
+export type { CalendarPropertyMutation } from '../domain/calendar-property-mutation';
+
+export type CalendarSharedConfigField =
+	| 'name'
+	| 'recursive'
+	| 'startDateProperty'
+	| 'endDateProperty'
+	| 'openBehavior'
+	| 'excludePaths';
+
+export interface SaveCalendarOptions {
+	changedFields?: readonly CalendarSharedConfigField[];
+	propertyMutations?: readonly CalendarPropertyMutation[];
+	revalidateBoardGroups?: readonly string[];
+}
+
+function applySharedField(
+	target: CalendarConfig,
+	source: CalendarConfig,
+	field: CalendarSharedConfigField,
+): void {
+	switch (field) {
+		case 'name':
+			target.name = source.name;
+			return;
+		case 'recursive':
+			target.recursive = source.recursive;
+			return;
+		case 'startDateProperty':
+			target.startDateProperty = source.startDateProperty;
+			return;
+		case 'endDateProperty':
+			if (source.endDateProperty) target.endDateProperty = source.endDateProperty;
+			else delete target.endDateProperty;
+			return;
+		case 'openBehavior':
+			target.openBehavior = source.openBehavior;
+			return;
+		case 'excludePaths':
+			target.excludePaths = [...source.excludePaths];
+	}
+}
+
+function mergeChangedSharedFields(
+	current: CalendarConfig,
+	requested: CalendarConfig,
+	fields: readonly CalendarSharedConfigField[] | undefined,
+): CalendarConfig {
+	if (!fields) return copyCalendarConfig(requested);
+	const merged = copyCalendarConfig(current);
+	for (const field of new Set(fields)) applySharedField(merged, requested, field);
+	return merged;
 }
 
 function markdownDocument(
@@ -60,9 +130,12 @@ function validateDatePropertyNames(
 }
 
 export class CalendarDocumentService {
+	private readonly documentCodec = new ObsidianMarkdownDocumentCodec();
+
 	constructor(
 		private readonly app: App,
-		private readonly createEventId?: () => string,
+		private readonly createEventId: (() => string) | undefined,
+		private readonly configCoordinator: CalendarConfigMutationCoordinator,
 	) {}
 
 	list(): TFile[] {
@@ -77,6 +150,12 @@ export class CalendarDocumentService {
 	read(file: TFile): CalendarConfigResult {
 		const cache = this.app.metadataCache.getFileCache(file);
 		return parseCalendarConfig(file.path, cache?.frontmatter);
+	}
+
+	async readFresh(file: TFile): Promise<CalendarConfigResult> {
+		const content = await this.app.vault.read(file);
+		const document = this.documentCodec.decode(content);
+		return parseCalendarConfig(file.path, document.frontmatter);
 	}
 
 	validateLocations(config: CalendarConfig): ConfigIssue[] {
@@ -113,6 +192,7 @@ export class CalendarDocumentService {
 		const frontmatter: Record<string, unknown> = {};
 		const calendarFolder = normalizeVaultPath(input.documentFolder);
 		const propertyDefinitions = defaultCalendarPropertyDefinitions();
+		const viewCatalog = createDefaultSavedViewCatalog();
 		const config: CalendarConfig = {
 			documentPath: path,
 			name,
@@ -122,6 +202,7 @@ export class CalendarDocumentService {
 			visibleProperties: Object.keys(propertyDefinitions),
 			propertyDefinitions,
 			cardColorProperty: 'status',
+			viewCatalog,
 			weekStartsOn: 'locale',
 			layout: 'month',
 			openBehavior: 'same-leaf',
@@ -130,22 +211,131 @@ export class CalendarDocumentService {
 		};
 		const endProperty = input.endDateProperty?.trim();
 		if (endProperty) config.endDateProperty = endProperty;
-		applyCalendarConfigToFrontmatter(frontmatter, config);
+		applyCalendarConfigWithSavedViewsToFrontmatter(frontmatter, config);
 		return this.app.vault.create(path, markdownDocument(frontmatter));
 	}
 
-	async save(config: CalendarConfig): Promise<void> {
-		if (!isCalendarDocumentPath(config.documentPath)) {
+	async save(
+		config: CalendarConfig,
+		options: SaveCalendarOptions = {},
+	): Promise<CalendarConfig> {
+		const requested = copyCalendarConfig(config);
+		const propertyMutations = (options.propertyMutations ?? []).map(
+			copyCalendarPropertyMutation,
+		);
+		const revalidateBoardGroups = [...(options.revalidateBoardGroups ?? [])];
+		const usesPatch =
+			options.changedFields !== undefined ||
+			options.propertyMutations !== undefined ||
+			options.revalidateBoardGroups !== undefined;
+		const changedFields = usesPatch ? [...(options.changedFields ?? [])] : undefined;
+		if (!isCalendarDocumentPath(requested.documentPath)) {
 			throw new Error('Calendar documents must use <root>/<calendar>/_calendar.md.');
 		}
 		validateDatePropertyNames(
-			config.startDateProperty,
-			config.endDateProperty,
+			requested.startDateProperty,
+			requested.endDateProperty,
 		);
-		const file = this.app.vault.getFileByPath(config.documentPath);
-		if (!file) throw new Error(`Calendar document not found: ${config.documentPath}`);
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-			applyCalendarConfigToFrontmatter(frontmatter as Record<string, unknown>, config);
+		return this.configCoordinator.run(requested.documentPath, async () => {
+			const file = this.app.vault.getFileByPath(requested.documentPath);
+			if (!file) throw new Error(`Calendar document not found: ${requested.documentPath}`);
+			let committed: CalendarConfig | undefined;
+			await this.app.fileManager.processFrontMatter(file, (rawFrontmatter) => {
+				const frontmatter = rawFrontmatter as Record<string, unknown>;
+				const currentResult = parseCalendarConfig(requested.documentPath, frontmatter);
+				const currentConfig = currentResult.config ?? requested;
+				const dateCleanupCandidates = revalidateBoardGroups.filter(
+					(property) =>
+						Boolean(property) &&
+						isWritableBoardGroupProperty(currentConfig, property),
+				);
+				let nextConfig = mergeChangedSharedFields(
+					currentConfig,
+					requested,
+					changedFields,
+				);
+				if (
+					(changedFields || propertyMutations.length > 0) &&
+					!currentResult.config
+				) {
+					throw new Error(
+						'The calendar configuration changed and must be repaired before saving settings.',
+					);
+				}
+				const affectedBoardGroups = new Set<string>();
+				for (const mutation of propertyMutations) {
+					const beforeMutation = nextConfig;
+					nextConfig = applyCalendarPropertyMutation(beforeMutation, mutation);
+					if (
+						mutation.kind === 'remove' &&
+						beforeMutation.propertyDefinitions[mutation.property]
+					) {
+						affectedBoardGroups.add(mutation.property);
+					}
+					if (
+						mutation.kind === 'update' &&
+						isWritableBoardGroupProperty(beforeMutation, mutation.property) &&
+						!isWritableBoardGroupProperty(nextConfig, mutation.property)
+					) {
+						affectedBoardGroups.add(mutation.property);
+					}
+				}
+				for (const property of dateCleanupCandidates) {
+					if (!isWritableBoardGroupProperty(nextConfig, property)) {
+						affectedBoardGroups.add(property);
+					}
+				}
+				validateDatePropertyNames(
+					nextConfig.startDateProperty,
+					nextConfig.endDateProperty,
+				);
+				const currentViews = parseSavedViewCatalog(frontmatter, {
+					startDateProperty: nextConfig.startDateProperty,
+					endDateProperty: nextConfig.endDateProperty,
+					propertyDefinitions: nextConfig.propertyDefinitions,
+				});
+				if (
+					affectedBoardGroups.size > 0 &&
+					!currentViews.catalog.canMutate
+				) {
+					throw new Error(
+						'Cannot clear Board grouping in a structurally invalid saved-view catalog.',
+					);
+				}
+
+				let catalogToWrite =
+					currentViews.catalog.source === 'legacy'
+						? currentViews.catalog
+						: undefined;
+				if (affectedBoardGroups.size > 0) {
+					const configWithCurrentViews = {
+						...nextConfig,
+						viewCatalog: currentViews.catalog,
+					};
+					const reconciled = clearInvalidBoardGroupReferences(
+						configWithCurrentViews,
+						affectedBoardGroups,
+					);
+					if (reconciled !== configWithCurrentViews) {
+						catalogToWrite = reconciled.viewCatalog;
+					}
+				}
+
+				applyCalendarConfigToFrontmatter(frontmatter, nextConfig);
+				if (
+					catalogToWrite &&
+					!applySavedViewCatalogToFrontmatter(frontmatter, catalogToWrite)
+				) {
+					throw new Error('Unable to update the saved-view configuration.');
+				}
+				const verified = parseCalendarConfig(requested.documentPath, frontmatter);
+				if (!verified.config) {
+					throw new Error('The updated calendar configuration could not be verified.');
+				}
+				committed = copyCalendarConfig(verified.config);
+			});
+			if (!committed) throw new Error('The calendar settings update did not complete.');
+			return committed;
 		});
 	}
 

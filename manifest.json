@@ -3,7 +3,7 @@
 	"name": "Vault Calendar",
 	"version": "0.1.7",
 	"minAppVersion": "1.13.7",
-	"description": "Turn Markdown notes into a property-driven calendar with editable cards and start-to-end date ranges.",
+	"description": "Turn Markdown notes into local calendar and board views with editable, property-driven cards.",
 	"author": "Jax Ho",
 	"authorUrl": "https://github.com/jax-ho",
 	"isDesktopOnly": true

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	ExternalModificationError,
 	FrontmatterWriter,
+	MissingFileError,
 	type FrontmatterWritePort,
 	type WritableFile,
 } from './frontmatter-writer';
@@ -119,5 +120,90 @@ describe('safe frontmatter writer', () => {
 				{ start: '2026-08-20' },
 			),
 		).rejects.toBeInstanceOf(ExternalModificationError);
+	});
+
+	it('updates exactly one property and preserves an explicit None value', async () => {
+		const file = { path: 'Task.md', stat: { mtime: 10 } };
+		const frontmatter: Record<string, unknown> = {
+			title: 'Task',
+			date: '2026-08-17',
+			status: 'Doing',
+			type: 'Task',
+			nested: { keep: true },
+		};
+		const writer = new FrontmatterWriter(createPort(frontmatter, file));
+
+		await writer.updateProperty('Task.md', 10, 'status', 'None');
+
+		expect(frontmatter).toEqual({
+			title: 'Task',
+			date: '2026-08-17',
+			status: 'None',
+			type: 'Task',
+			nested: { keep: true },
+		});
+	});
+
+	it('refuses a property update when the file is missing or already changed', async () => {
+		const file = { path: 'Task.md', stat: { mtime: 11 } };
+		const frontmatter = { status: 'Doing' };
+		const writer = new FrontmatterWriter(createPort(frontmatter, file));
+
+		await expect(
+			writer.updateProperty('Missing.md', 10, 'status', 'Done'),
+		).rejects.toBeInstanceOf(MissingFileError);
+		await expect(
+			writer.updateProperty('Task.md', 10, 'status', 'Done'),
+		).rejects.toBeInstanceOf(ExternalModificationError);
+		expect(frontmatter.status).toBe('Doing');
+	});
+
+	it('re-checks mtime inside a property update transaction', async () => {
+		const file = { path: 'Task.md', stat: { mtime: 10 } };
+		const frontmatter = { status: 'Doing' };
+		const port = createPort(frontmatter, file);
+		port.processFrontMatter = async (_file, mutate) => {
+			file.stat.mtime = 12;
+			mutate(frontmatter);
+		};
+		const writer = new FrontmatterWriter(port);
+
+		await expect(
+			writer.updateProperty('Task.md', 10, 'status', 'Done'),
+		).rejects.toBeInstanceOf(ExternalModificationError);
+		expect(frontmatter.status).toBe('Doing');
+	});
+
+	it('does not mutate frontmatter when an in-flight property update is aborted', async () => {
+		const file = { path: 'Task.md', stat: { mtime: 10 } };
+		const frontmatter = { status: 'Doing' };
+		const port = createPort(frontmatter, file);
+		let runMutation: (() => void) | undefined;
+		port.processFrontMatter = (_file, mutate) =>
+			new Promise<void>((resolve, reject) => {
+				runMutation = () => {
+					try {
+						mutate(frontmatter);
+						resolve();
+					} catch (error) {
+						reject(error instanceof Error ? error : new Error(String(error)));
+					}
+				};
+			});
+		const writer = new FrontmatterWriter(port);
+		const controller = new AbortController();
+
+		const write = writer.updateProperty(
+			'Task.md',
+			10,
+			'status',
+			'Done',
+			controller.signal,
+		);
+		controller.abort();
+		runMutation?.();
+
+		await expect(write).rejects.toMatchObject({ name: 'AbortError' });
+		expect(frontmatter.status).toBe('Doing');
 	});
 });

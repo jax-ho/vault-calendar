@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CalendarConfig } from '../types';
 import {
 	addCalendarProperty,
+	clearInvalidBoardGroupReferences,
 	createPropertyDefinition,
 	moveCalendarProperty,
 	removeCalendarProperty,
@@ -30,6 +31,40 @@ function config(): CalendarConfig {
 			Type: createPropertyDefinition('select'),
 		},
 		cardColorProperty: 'Status',
+		viewCatalog: {
+			source: 'canonical',
+			canMutate: true,
+			entries: [
+				{
+					kind: 'valid',
+					definition: {
+						id: 'calendar',
+						name: 'Calendar',
+						type: 'calendar',
+						layout: 'month',
+						weekStartsOn: 'monday',
+					},
+				},
+				{
+					kind: 'valid',
+					definition: {
+						id: 'status-board',
+						name: 'Status board',
+						type: 'board',
+						groupBy: 'Status',
+					},
+				},
+				{
+					kind: 'valid',
+					definition: {
+						id: 'stale-board',
+						name: 'Stale board',
+						type: 'board',
+						groupBy: 'ArchivedStage',
+					},
+				},
+			],
+		},
 		weekStartsOn: 'monday',
 		layout: 'month',
 		openBehavior: 'same-leaf',
@@ -57,6 +92,14 @@ describe('calendar property schema management', () => {
 		expect(Object.keys(next.propertyDefinitions)).toEqual(['Progress', 'Type']);
 		expect(next.visibleProperties).toEqual(['Progress', 'Type']);
 		expect(next.cardColorProperty).toBe('Progress');
+		expect(next.viewCatalog?.entries[1]).toMatchObject({
+			kind: 'valid',
+			definition: { id: 'status-board', groupBy: 'Progress' },
+		});
+		expect(next.viewCatalog?.entries[2]).toMatchObject({
+			kind: 'valid',
+			definition: { id: 'stale-board', groupBy: 'ArchivedStage' },
+		});
 	});
 
 	it('updates, reorders, hides, and removes properties consistently', () => {
@@ -72,6 +115,46 @@ describe('calendar property schema management', () => {
 		next = removeCalendarProperty(next, 'Status');
 		expect(Object.keys(next.propertyDefinitions)).toEqual(['Type']);
 		expect(next.cardColorProperty).toBeUndefined();
+		expect(next.viewCatalog?.entries[1]).toMatchObject({
+			kind: 'valid',
+			definition: { id: 'status-board', groupBy: undefined },
+		});
+		expect(next.viewCatalog?.entries[2]).toMatchObject({
+			kind: 'valid',
+			definition: { id: 'stale-board', groupBy: 'ArchivedStage' },
+		});
+	});
+
+	it('clears a Board group when its Select property changes type', () => {
+		const next = updateCalendarProperty(config(), 'Status', { type: 'text' });
+
+		expect(next.viewCatalog?.entries[1]).toMatchObject({
+			kind: 'valid',
+			definition: { id: 'status-board', groupBy: undefined },
+		});
+		expect(next.viewCatalog?.entries[2]).toMatchObject({
+			kind: 'valid',
+			definition: { id: 'stale-board', groupBy: 'ArchivedStage' },
+		});
+	});
+
+	it('clears Board groups that become date fields', () => {
+		const next = clearInvalidBoardGroupReferences(
+			{
+				...config(),
+				startDateProperty: 'Status',
+			},
+			['Status'],
+		);
+
+		expect(next.viewCatalog?.entries[1]).toMatchObject({
+			kind: 'valid',
+			definition: { id: 'status-board', groupBy: undefined },
+		});
+		expect(next.viewCatalog?.entries[2]).toMatchObject({
+			kind: 'valid',
+			definition: { id: 'stale-board', groupBy: 'ArchivedStage' },
+		});
 	});
 
 	it('creates deterministic unique names and rejects case-insensitive duplicates', () => {

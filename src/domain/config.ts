@@ -2,16 +2,22 @@ import type {
 	CalendarConfig,
 	CalendarConfigResult,
 	CalendarColor,
-	CalendarLayout,
 	CalendarPropertyDefinition,
 	CalendarPropertyType,
 	ConfigIssue,
 	OpenBehavior,
-	WeekStartsOn,
 } from '../types';
 import { isCalendarColor } from './calendar-colors';
 import { copyCalendarPropertyDefinitions } from './calendar-copy';
 import { isReservedEventProperty } from './reserved-properties';
+import {
+	applySavedViewCatalogToFrontmatter,
+	createDefaultSavedViewCatalog,
+	firstCalendarSavedView,
+	parseSavedViewCatalog,
+	SAVED_VIEW_KEYS,
+	serializeSavedViewCatalog,
+} from './saved-views';
 
 export const CALENDAR_KEYS = {
 	marker: 'calendar-view',
@@ -21,8 +27,11 @@ export const CALENDAR_KEYS = {
 	visibleProperties: 'calendar-visible-properties',
 	propertyDefinitions: 'calendar-properties',
 	cardColorProperty: 'calendar-card-color-property',
-	weekStartsOn: 'calendar-week-starts-on',
-	layout: 'calendar-layout',
+	viewsVersion: SAVED_VIEW_KEYS.version,
+	views: SAVED_VIEW_KEYS.views,
+	weekStartsOn: SAVED_VIEW_KEYS.legacyWeekStartsOn,
+	layout: SAVED_VIEW_KEYS.legacyLayout,
+	boardGroupProperty: SAVED_VIEW_KEYS.legacyBoardGroupProperty,
 	openBehavior: 'calendar-open-behavior',
 	excludePaths: 'calendar-exclude-paths',
 } as const;
@@ -438,6 +447,12 @@ export function parseCalendarConfig(
 	for (const path of excludePaths) {
 		validateVaultPath(path, CALENDAR_KEYS.excludePaths, issues);
 	}
+	const savedViews = parseSavedViewCatalog(frontmatter, {
+		startDateProperty: rawStartProperty,
+		endDateProperty: rawEndProperty || undefined,
+		propertyDefinitions,
+	});
+	const compatibilityCalendarView = firstCalendarSavedView(savedViews.catalog);
 
 	const config: CalendarConfig = {
 		documentPath: normalizedDocumentPath,
@@ -453,20 +468,10 @@ export function parseCalendarConfig(
 		visibleProperties,
 		propertyDefinitions,
 		cardColorProperty,
-		weekStartsOn: enumValue<WeekStartsOn>(
-			frontmatter,
-			CALENDAR_KEYS.weekStartsOn,
-			'locale',
-			['locale', 'monday', 'sunday'],
-			issues,
-		),
-		layout: enumValue<CalendarLayout>(
-			frontmatter,
-			CALENDAR_KEYS.layout,
-			'month',
-			['month', 'week'],
-			issues,
-		),
+		viewCatalog: savedViews.catalog,
+		// Transitional facade for callers that have not selected a saved view yet.
+		weekStartsOn: compatibilityCalendarView?.weekStartsOn ?? 'locale',
+		layout: compatibilityCalendarView?.layout ?? 'month',
 		openBehavior: enumValue<OpenBehavior>(
 			frontmatter,
 			CALENDAR_KEYS.openBehavior,
@@ -482,7 +487,7 @@ export function parseCalendarConfig(
 	return {
 		isCalendarDocument: true,
 		config: issues.length === 0 ? config : undefined,
-		issues,
+		issues: [...issues, ...savedViews.issues],
 	};
 }
 
@@ -514,12 +519,30 @@ export function applyCalendarConfigToFrontmatter(
 		config.cardColorProperty && !isReservedEventProperty(config.cardColorProperty)
 			? config.cardColorProperty
 			: '';
-	frontmatter[CALENDAR_KEYS.weekStartsOn] = config.weekStartsOn;
-	frontmatter[CALENDAR_KEYS.layout] = config.layout;
 	frontmatter[CALENDAR_KEYS.openBehavior] = config.openBehavior;
 	if (config.excludePaths.length > 0) {
 		frontmatter[CALENDAR_KEYS.excludePaths] = [...config.excludePaths];
 	} else {
 		delete frontmatter[CALENDAR_KEYS.excludePaths];
+	}
+}
+
+/**
+ * Writes a complete canonical calendar document. Ordinary settings saves should use
+ * applyCalendarConfigToFrontmatter so a stale config cannot replace newer saved views.
+ */
+export function applyCalendarConfigWithSavedViewsToFrontmatter(
+	frontmatter: Record<string, unknown>,
+	config: CalendarConfig,
+): void {
+	const catalog =
+		config.viewCatalog ??
+		createDefaultSavedViewCatalog(config.layout, config.weekStartsOn);
+	// Validate before changing shared keys so direct callers never observe a partial write.
+	serializeSavedViewCatalog(catalog);
+	applyCalendarConfigToFrontmatter(frontmatter, config);
+	const written = applySavedViewCatalogToFrontmatter(frontmatter, catalog);
+	if (!written) {
+		throw new Error('Cannot write a structurally invalid saved-view catalog.');
 	}
 }
