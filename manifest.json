@@ -1,7 +1,7 @@
 {
 	"id": "vault-calendar",
 	"name": "Vault Calendar",
-	"version": "0.1.7",
+	"version": "0.1.8",
 	"minAppVersion": "1.13.7",
 	"description": "Turn Markdown notes into local calendar and board views with editable, property-driven cards.",
 	"author": "Jax Ho",
